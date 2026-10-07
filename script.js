@@ -42,7 +42,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     tabs: { tools: true, bots: true, roadmap: true, tab3: true, phone: true },
     featuredVisible: true,
     roadmapVisible: true,
-    navLabels: { tools: 'TOOLS', bots: 'BOTS', roadmap: 'ROADMAP', tab3: 'CS2W', phone: 'Encrypted Phone' },
+    navLabels: { tools: 'TOOLS', bots: 'BOTS', roadmap: 'ROADMAP', tab3: 'CS2', phone: 'Encrypted Phone' },
     featured: { label: 'Latest Tools & Bots' },
     steamCfg: {
       key: '', proxy: '', bridge: '', bridgeOnly: true, last: '', cache: {}, floatKey: '', hltvKey: '', hltvUrl: '', leetifyKey: '', faceitKey: '', faceitKeyName: '', faceitSeeded: false,
@@ -294,7 +294,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function applySettings() {
     const a = isAdmin();
     if (!settings.discord || settings.discord === 'https://discord.com') settings.discord = DISCORD_URL;   // old default -> the MWAY LABS invite
-    if (!settings.navLabels.tab3 || /^(gaming|cs2)$/i.test(settings.navLabels.tab3)) settings.navLabels.tab3 = 'CS2W';   // the Gaming icon tab is now the text tab "CS2W" (same capitalisation as HOME / TOOLS)
+    if (!settings.navLabels.tab3 || /^(gaming|cs2w)$/i.test(settings.navLabels.tab3)) settings.navLabels.tab3 = 'CS2';   // the Gaming icon tab is now the text tab "CS2W" (same capitalisation as HOME / TOOLS)
     $('#discordBtn').href = settings.discord;
     $('#subText').textContent = settings.subtitle;
     $('#heroTagText').textContent = settings.heroTag;
@@ -2674,18 +2674,14 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     diag('info', 'app', 'friends: ' + acc.checked + ' of ' + ids.length + ' checked, ' + acc.any + ' with bans');
     updFr();
   }
-  function updFr() {   // v10: compact box that sits in the top row, right of the "Last 5" form
+  function updFr() {
     const box = $('#lkFr'), f = lkv && lkv.fr; if (!box || !f) return;
-    const L = '<span class="fr-mini-l">Banned friends</span>';
-    if (f.state === 'loading') { box.innerHTML = `<div class="fr-mini">${L}<span class="muted">${invSpin}&hellip;</span></div>`; return; }
-    if (f.state === 'nokey') { box.innerHTML = `<div class="fr-mini" title="A Steam Web API key is needed to read the friends list.">${L}<span class="muted">no Steam key</span></div>`; return; }
-    if (f.state === 'private') { box.innerHTML = `<div class="fr-mini" title="This player's friends list is private (or empty), so friends cannot be checked.">${L}<span class="muted">list private</span></div>`; return; }
-    if (f.state === 'err') { box.innerHTML = `<div class="fr-mini" title="Friend bans could not be loaded right now.">${L}<span class="muted">unavailable</span></div>`; return; }
-    const parts = [['VAC', f.vac], ['Game ban', f.game], ['Trade ban', f.trade], ['Community', f.comm]].filter(x => x[1] > 0);
-    const chips = parts.map(x => `<span class="fr-chip"><b>${x[1]}</b>${x[0]}</span>`).join('');
-    const part = f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : '';
-    const tip = `${f.any} of ${f.checked.toLocaleString('en-US')} friends checked have a ban${parts.length ? ' (' + parts.map(x => x[0] + ' ' + x[1]).join(', ') + ')' : ''}${part}`;
-    box.innerHTML = `<div class="fr-mini ${f.any ? 'bad' : 'clean'}" title="${esc(tip)}">${L}<b class="fr-mini-n">${f.any}</b><span class="fr-mini-s">${f.any ? 'of ' + f.checked.toLocaleString('en-US') + ' checked' : 'none flagged &middot; ' + f.checked.toLocaleString('en-US') + ' checked'}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div>`;
+    if (f.state === 'loading') { box.innerHTML = `<p class="muted">${invSpin} Checking friends for bans&hellip;</p>`; return; }
+    if (f.state === 'nokey') { box.innerHTML = '<p class="muted">A Steam Web API key is needed to read the friends list.</p>'; return; }
+    if (f.state === 'private') { box.innerHTML = '<p class="muted">This player\'s friends list is private (or empty), so friends cannot be checked.</p>'; return; }
+    if (f.state === 'err') { box.innerHTML = '<p class="muted">Friend bans could not be loaded right now.</p>'; return; }
+    const chips = [['VAC', f.vac], ['Game ban', f.game], ['Trade ban', f.trade], ['Community', f.comm]].filter(x => x[1] > 0).map(x => `<span class="fr-chip"><b>${x[1]}</b>${x[0]}</span>`).join('');
+    box.innerHTML = `<div class="fr-card ${f.any ? 'bad' : 'clean'}"><div class="fr-num"><b>${f.any}</b></div><div class="fr-b"><span class="fr-t">${f.any ? (f.any === 1 ? 'friend with a ban' : 'friends with bans') : 'No banned friends'}</span><span class="muted">${f.any ? `out of ${f.checked.toLocaleString('en-US')} friends checked` : `${f.checked.toLocaleString('en-US')} friends checked, none flagged`}${f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : ''}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div></div>`;
   }
 
   /* ---- v6: Top 6 teammates (Leetify match history; falls back to recent_teammates counts) ---- */
@@ -3500,7 +3496,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const links = `<div class="lk-links"><button type="button" id="lkXh" class="lk-xh loading" disabled aria-label="Player crosshair"></button>${[lkIcon('steam', url, 'Steam Profile'),
       rk.faceit || fcNick ? lkIcon('faceit', faceitUrl, 'Faceit Profile') : '',
       lkIcon('leetify', 'https://leetify.com/app/profile/' + d.id, 'Leetify Profile'),
-      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div><div id="lkFr" class="lk-fr"></div></div>`;
+      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div></div>`;
     /* v7: the Faceit and Premier boxes (plus the Trust Factor beside them) are ALWAYS rendered, so the layout never collapses
        when a player has no rank, no Faceit account or no Leetify data: the empty boxes say "Unranked" instead. */
     const hc = d.hltv >= 1.1 ? '#4fb286' : d.hltv >= 1 ? '#5b8def' : d.hltv >= 0.9 ? '#d1a455' : '#d1556a';
@@ -3532,6 +3528,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       ${d.steamNote ? `<p class="muted">${esc(d.steamNote)}</p>` : ''}
       <span class="flabel mt-s">CS2 player data</span>${cs2}
       <span class="flabel mt-s">Top 6 Teammates</span><div id="lkTm" class="lk-tm"></div>
+      <span class="flabel mt-s">Banned friends</span><div id="lkFr" class="lk-fr"></div>
       <span class="flabel mt-s">Inventory value</span><div id="lkInv" class="lk-inv"></div>
       <div id="lkTabs" class="lk-tabs" role="tablist"></div><div id="lkTabBody" class="lk-tabbody hidden"></div>
     </div>`;
