@@ -1,9 +1,6 @@
 /* ---- Cloudflare Worker bridge (worker.js) ----
    Paste your Worker URL here (https://xxx.workers.dev) or enter it in Admin > Steam API Provisioning.
    The Admin value wins when both are set. Leave both empty to keep using the public CORS proxies. */
-/* v4 FIX (external Steam login): the bridge URL used to exist only in the Admin's own browser (it is a "private" setting and is
-   never published), so every other visitor had NO bridge, fell back to public CORS proxies that Steam blocks, and timed out.
-   The Worker URL is not a secret (it is visible in every network request), so it is baked in here for all visitors. */
 const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
 (() => {
@@ -15,8 +12,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const MASTER = 'user';
   const VAULT_CODE = '1337';
   const load = (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } };
-  /* Global site state (settings, tools, bots) is mirrored to the Worker so visitors on any device see it. See "12g. GLOBAL SYNC". */
-  const GLOBAL_KEYS = ['mway_settings', 'mway_tools', 'mway_bots'];
+  /* Global site state (settings) is mirrored to the Worker so visitors on any device see it. See "12g. GLOBAL SYNC". */
+  const GLOBAL_KEYS = ['mway_settings'];
   const GS = { timer: 0, busy: false, again: false, pending: false, pulling: null, rev: 0, msg: '', bad: false, polled: 0 };
   const save = (k, v) => {
     let ok = true;
@@ -39,31 +36,18 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     cvVisible: true,
     aboutVisible: true,
     aboutTitle: 'About Me',
-    tabs: { tools: true, bots: true, roadmap: true, tab3: true, phone: true },
-    featuredVisible: true,
+    steamTitle: 'My Steam Accounts',
+    tabs: { roadmap: true, tab3: true },
+    pinnedVisible: true,
+    pinnedLabel: 'Newest CS2 Tools',
+    pinned: { account: true, crosshair: true },
     roadmapVisible: true,
-    navLabels: { tools: 'TOOLS', bots: 'BOTS', roadmap: 'ROADMAP', tab3: 'CS2', phone: 'Encrypted Phone' },
-    featured: { label: 'Latest Tools & Bots' },
+    navLabels: { roadmap: 'ROADMAP', tab3: 'CS2' },
     steamCfg: {
       key: '', proxy: '', bridge: '', bridgeOnly: true, last: '', cache: {}, floatKey: '', hltvKey: '', hltvUrl: '', leetifyKey: '', faceitKey: '', faceitKeyName: '', faceitSeeded: false,
       accounts: 'https://steamcommunity.com/id/mboz\nhttps://steamcommunity.com/id/mz5001'
-    },
-    quick: [{ label: 'Quick Download 1', toolId: 'tool-example', visible: true }, { label: 'Quick Download 2', toolId: '', visible: true }]
+    }
   };
-  const DEFAULT_TOOLS = [{
-    id: 'tool-example', title: 'OSINT Toolkit (Example)',
-    desc: 'Placeholder utility for gathering and organizing public-source data. Replace or edit this entry from the admin panel.',
-    img: '', status: 'listed', titleColor: '', font: 'default',
-    badge: { text: 'BETA', style: 'outline', bg: '#1b2a4a', color: '#8fb2ff' },
-    author: { stamp: true, text: '' },
-    versions: [
-      { v: 'V0.5', file: '', fileName: '', available: false },
-      { v: 'V0.6', file: '', fileName: '', available: true },
-      { v: 'V0.7', file: '', fileName: '', available: true }
-    ]
-  }];
-
-  const DEFAULT_BOTS = [];
   const RM_STATUS = { planned: 'Planned', active: 'In progress', done: 'Reached' };
   const DEFAULT_ROADMAP = [
     { id: 'm1', name: 'Foundation', desc: 'Core node, secure vault login and admin console online.', status: 'done' },
@@ -78,45 +62,26 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     })).filter(m => m.name);
   }
 
-  function normTool(t) {
-    const o = Object.assign({ font: 'default', titleColor: '', badge: {} }, t);
-    o.status = t.status || (t.listed === false ? 'unlisted' : 'listed');
-    // Migrate legacy single-file tools into a one-version list
-    if (!Array.isArray(o.versions)) o.versions = t.file ? [{ v: 'V1.0', file: t.file, fileName: t.fileName || '', available: true }] : [];
-    o.versions = o.versions.map(v => ({ v: String(v.v || ''), file: v.file || '', fileName: v.fileName || '', available: v.available !== false }));
-    delete o.file; delete o.fileName;
-    o.updated = Number(t.updated) || Number((String(t.id).match(/(\d{10,})$/) || [])[1]) || 0; // drives 'Latest Tools & Bots'
-    o.author = Object.assign({ stamp: false, text: '' }, t.author);
-    return o;
-  }
-
   function buildSettings(saved) {
     saved = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
     const st = Object.assign({}, DS, saved);
-    ['tabs', 'navLabels', 'featured', 'steamCfg'].forEach(k => { st[k] = Object.assign({}, DS[k], saved[k]); });
-    // Migrations: TAB 4 -> BOTS, single featured tool -> automatic feed, quick-button visibility
-    const oldTabs = saved.tabs || {};
-    if ('tab4' in oldTabs && !('bots' in oldTabs)) st.tabs.bots = oldTabs.tab4;
-    delete st.tabs.tab4; delete st.navLabels.tab4;
-    st.featured = { label: (!st.featured.label || st.featured.label === 'Latest Tools') ? DS.featured.label : st.featured.label };
-    st.quick = DS.quick.map((d, i) => Object.assign({}, d, (Array.isArray(saved.quick) ? saved.quick[i] : null) || {}));
+    ['tabs', 'navLabels', 'pinned', 'steamCfg'].forEach(k => { st[k] = Object.assign({}, DS[k], saved[k]); });
+    ['tools', 'bots', 'phone', 'tab4'].forEach(k => { delete st.tabs[k]; delete st.navLabels[k]; });
+    ['featured', 'featuredVisible', 'quick'].forEach(k => { delete st[k]; });
+    if (!String(st.steamTitle || '').trim()) st.steamTitle = DS.steamTitle;
+    if (!String(st.pinnedLabel || '').trim()) st.pinnedLabel = DS.pinnedLabel;
     if (!st.steamCfg.cache || typeof st.steamCfg.cache !== 'object') st.steamCfg.cache = {};
     st.cvVisible = saved.cvVisible !== false;
     return st;
   }
   let about = load('mway_about', DEFAULT_ABOUT);
   let settings = buildSettings(load('mway_settings', {}));
-  let tools = load('mway_tools', DEFAULT_TOOLS).map(normTool);
-  let bots = load('mway_bots', DEFAULT_BOTS).map(normTool);
   let roadmap = normRoadmap(load('mway_roadmap', DEFAULT_ROADMAP));
   let mailing = load('mway_mailing', []);
   let users = load('mway_users', []);
-  let logs = load('mway_logs', []);
-  let reviews = load('mway_reviews', []);
   let session = null;
   try { session = JSON.parse(sessionStorage.getItem('mway_session')); } catch { session = null; }
   let unlocked = sessionStorage.getItem('mway_unlocked') === '1' || (!!session && !session.steam); // Steam sessions never unlock the local login
-  const selVer = {}; // per-card selected version (in memory)
 
   const isAdmin = () => !!session && (session.master || session.role === 'admin');
 
@@ -126,7 +91,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const okColor = v => !!v && CSS.supports('color', v);
   const rnd = n => Math.floor(Math.random() * n);
   const fmtTime = iso => iso.replace('T', ' ').slice(0, 19) + ' UTC';
   const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -210,23 +174,13 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     diagRender();
   }
 
-  /* Version helpers: highest numeric version wins */
-  const verNums = v => (String(v).match(/\d+/g) || []).map(Number);
-  function cmpVer(a, b) {
-    const x = verNums(a.v), y = verNums(b.v);
-    for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
-    return a.v.localeCompare(b.v, undefined, { numeric: true });
-  }
-  const sortedVers = t => [...t.versions].sort((a, b) => cmpVer(b, a));
-  const latestActive = t => sortedVers(t).find(v => v.available) || null;
-  const fileLabel = v => v.file ? (v.file.startsWith('data:') ? '[stored] ' + (v.fileName || 'uploaded file') : v.file) : 'no file attached';
+  const opts = (map, cur, pick) => Object.keys(map).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(pick ? pick(map[k]) : map[k])}</option>`).join('');
 
   /* =====================================================================
      3. NAVIGATION: tabs, labels, settings application
      ===================================================================== */
-  /* Hash routing (works on any static host, no server rewrite needed): #/tools, #/bots, #/roadmap, #/gaming, #/phone, #/admin,
-     and #/tools/<id> or #/bots/<id> to link straight to one card. Back / forward and pasted links all work. */
-  const TAB_SLUG = { home: 'home', tools: 'tools', bots: 'bots', roadmap: 'roadmap', tab3: 'gaming', phone: 'phone', admin: 'admin' };
+  /* Hash routing (works on any static host, no server rewrite needed): #/roadmap, #/gaming, #/admin. Back / forward and pasted links all work. */
+  const TAB_SLUG = { home: 'home', roadmap: 'roadmap', tab3: 'gaming', admin: 'admin' };
   const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([k, v]) => [v, k]));
   function tabAllowed(name) {
     const pg = document.getElementById(name);
@@ -247,13 +201,13 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (location.hash === h || (!h && !location.hash)) return;
     try { history[replace ? 'replaceState' : 'pushState'](null, '', location.pathname + h); } catch { location.hash = h; }
   }
-  /* CS2 tab: dropdown with two sub pages. #/gaming/account (ACCOUNT SEARCH: player lookup + Steam IDs converter) and
-     #/gaming/crosshair (CROSSHAIR GENERATOR). */
+  /* CS2 tab: dropdown with sub pages: #/gaming/account (player lookup + Steam IDs converter), #/gaming/crosshair and #/gaming/utilities. */
   let tab3Sub = 'account';
   function setSub(sub) {
-    if (sub === 'account' || sub === 'crosshair') tab3Sub = sub;
+    if (sub === 'account' || sub === 'crosshair' || sub === 'utilities') tab3Sub = sub;
     $$('[data-subpage]').forEach(el => el.classList.toggle('sub-off', el.dataset.subpage !== tab3Sub));
     $$('#tab3Menu [data-sub]').forEach(b => { const on = b.dataset.sub === tab3Sub; b.classList.toggle('on', on); b.setAttribute('aria-current', on ? 'true' : 'false'); });
+    if (tab3Sub === 'utilities') utEnter();
   }
   function ddOpen(open) {
     const m = $('#tab3Menu'), b = $('#tab3Btn'); if (!m || !b) return;
@@ -280,7 +234,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (!r) { if (act && act.id !== 'home') activateTab('home'); return; }
     if (!tabAllowed(r.tab)) { if (!act || act.id !== 'home') activateTab('home'); if (location.hash && !GS.pending) setHash('home', '', true); return; }
     if (!act || act.id !== r.tab) activateTab(r.tab, r.id); else if (r.tab === 'tab3') setSub(r.id);
-    if (r.id && (r.tab === 'tools' || r.tab === 'bots')) focusCard(KIND[r.tab === 'bots' ? 'bot' : 'tool'], r.id);
   }
   $$('.tab:not(#tab3Btn)').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   $('#tab3Btn').addEventListener('click', e => { e.stopPropagation(); ddOpen($('#tab3Menu').classList.contains('hidden')); });
@@ -299,8 +252,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#subText').textContent = settings.subtitle;
     $('#heroTagText').textContent = settings.heroTag;
     $$('[data-lbl]').forEach(el => { el.textContent = settings.navLabels[el.dataset.lbl]; });
-    [['#tab3Btn', 'tab3'], ['#phoneBtn', 'phone']].forEach(([sel, k]) => { const b = $(sel); b.title = settings.navLabels[k]; b.setAttribute('aria-label', settings.navLabels[k]); });
-    ['tools', 'bots', 'roadmap', 'tab3', 'phone'].forEach(k => {
+    { const b = $('#tab3Btn'); b.title = settings.navLabels.tab3; b.setAttribute('aria-label', settings.navLabels.tab3); }
+    ['roadmap', 'tab3'].forEach(k => {
       const b0 = $(`.tab[data-tab="${k}"]`), b = b0.closest('.tab-dd') || b0, off = !settings.tabs[k];
       b.classList.toggle('hidden', off && !a); b0.classList.toggle('off', off);
     });
@@ -311,7 +264,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     st.classList.toggle('hidden', !settings.steam && !a);
     st.classList.toggle('faded', !settings.steam);
     $('#steamToggle').checked = settings.steam;
-    renderAbout(); renderFeatured(); renderRoadmap(); renderSteam(); renderQuick();
+    renderAbout(); renderPinned(); renderRoadmap(); renderSteam();
     const act = $('.page.active');
     if (act && ((act.id === 'admin' && !a) || (settings.tabs[act.id] === false && !a))) showTab('home', { replace: true });
   }
@@ -321,8 +274,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#steamLoginBtn').classList.toggle('on', !!(session && session.steam));
     $('#steamLoginBtn .sl-text').textContent = session && session.steam ? (session.name || session.id) + ' (Steam)' : 'Log in with Steam';
     $$('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-    if (!isAdmin()) { cancelAboutEdit(); wipeOtp(); }
-    applySettings(); renderLists(); renderAdmin(); renderXhSaved(); cvSyncMine();
+    if (!isAdmin()) { cancelAboutEdit(); cancelSteamEdit(); wipeOtp(); }
+    applySettings(); renderAdmin(); renderXhSaved(); cvSyncMine(); utRefresh();
   }
 
   /* =====================================================================
@@ -495,7 +448,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const post = { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: qs };
     const claimed = String(a['openid.claimed_id'] || '').replace(/^.*\//, '');
     const routes = [];
-    if (b) routes.push({ bridge: true }, { bridge: true });   // v4: second staggered attempt; the Worker caches a confirmed nonce so a retry is never reported as invalid
+    if (b) routes.push({ bridge: true }, { bridge: true });
     if (useLegacy) {
       legacyList().forEach(p => { if (p.post) routes.push({ p, m: 'POST' }); routes.push({ p, m: 'GET' }); });
       routes.push({ p: null, m: 'POST' }); // direct (works only if Steam ever allows CORS)
@@ -510,7 +463,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
         if (!j) throw netErr('NET', 'bridge returned an unreadable answer (HTTP ' + res.status + ')');
         if (j.valid === true) {
-          if (j.steamid === claimed) return true;
+          if (j.steamid === claimed) { steamTok = String(j.token || ''); return true; }
           throw netErr('INVALID', 'The bridge confirmed a different SteamID than the one in the login.');
         }
         if (res.status === 200 || res.status === 400) throw netErr('INVALID', j.error || 'Steam did not confirm this login.');
@@ -540,7 +493,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     try { return await raceRoutes(routes, run, { stagger: 3000, total: 26000 }); }
     catch (errs) {
       if ((errs || []).some(e => e && e.code === 'INVALID')) throw netErr('INVALID', 'Steam did not accept this login. Start the login again.');
-      const ref = (errs || []).find(e => e && /^Worker refused/.test(e.message || ''));   // v4: show WHY the Worker refused (e.g. origin not allowed)
+      const ref = (errs || []).find(e => e && /^Worker refused/.test(e.message || ''));
       if (ref) throw netErr('NET', ref.message + '. The site owner should check ALLOWED_ORIGINS on the Worker (Admin > Server Error & API Log shows the blocked origin).');
       throw netErr('NET', b && !useLegacy
         ? 'Could not confirm the login through the bridge. Check the bridge URL and ALLOWED_ORIGINS (Admin > Diagnostics Logger).'
@@ -548,8 +501,10 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     }
   }
 
+  let steamTok = '';
   function finishSteamLogin(id) {
-    session = { u: 'steam:' + id, id, name: id, steam: true, master: false, role: 'steam' };
+    session = { u: 'steam:' + id, id, name: id, steam: true, master: false, role: 'steam', tok: steamTok };
+    steamTok = '';
     sessionStorage.setItem('mway_session', JSON.stringify(session));
     applyAuth(); toast('Logged in with Steam.');
     if (settings.tabs.tab3 !== false) {
@@ -615,7 +570,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   });
 
   /* =====================================================================
-     6. HOME: subtitle, About Me, featured section, steam, quick buttons
+     6. HOME: subtitle, About Me, pinned tools, steam accounts
      ===================================================================== */
   function renderAbout() {
     $('#aboutTitle').textContent = settings.aboutTitle;
@@ -663,61 +618,45 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   });
   $('#steamToggle').addEventListener('change', e => { settings.steam = e.target.checked; save('mway_settings', settings); applySettings(); });
 
-  /* Featured ("Latest Tools & Bots"): the 3 most recently published/updated items from both arrays */
-  const KIND = {
-    tool: { label: 'Tool', tab: 'tools', list: '#toolList', store: 'mway_tools', form: '#publishForm', pfx: 'p' },
-    bot: { label: 'Bot', tab: 'bots', list: '#botList', store: 'mway_bots', form: '#botPublishForm', pfx: 'b' }
+  /* Pinned CS2 tools: admins choose which new tools are highlighted on the Home page; a click opens the tool's page. */
+  const PIN_TOOLS = {
+    account: { title: 'Account Search', desc: 'Look up any Steam / CS2 profile: ranks, FACEIT, Leetify, inventory value and more.', icon: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>' },
+    crosshair: { title: 'Crosshair Generator', desc: 'Build, preview and import CS2 crosshair share codes.', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>' }
   };
-  const getArr = k => k === 'bot' ? bots : tools;
-  const setArr = (k, v) => { if (k === 'bot') bots = v; else tools = v; save(KIND[k].store, v); };
-  const kindOf = t => bots.some(b => b.id === t.id) ? 'bot' : 'tool';
-  const allItems = () => tools.concat(bots);
-  const findItem = id => allItems().find(x => x.id === id) || null;
-  function latestItems() {
-    const a = isAdmin();
-    return allItems().filter(t => a || t.status !== 'unlisted').sort((x, y) => y.updated - x.updated).slice(0, 3);
-  }
-  function renderFeatured() {
-    const sec = $('#featuredSection'), on = settings.featuredVisible, items = latestItems();
-    $('#featuredTitle').textContent = settings.featured.label;
-    $('#featuredToggle').checked = on;
-    sec.classList.toggle('hidden', (!on || !items.length) && !isAdmin());
+  function renderPinned() {
+    const sec = $('#pinnedSection'), on = settings.pinnedVisible !== false, keys = Object.keys(PIN_TOOLS).filter(k => settings.pinned[k]);
+    $('#pinnedTitle').textContent = settings.pinnedLabel;
+    $('#pinnedToggle').checked = on;
+    sec.classList.toggle('hidden', (!on || !keys.length) && !isAdmin());
     sec.classList.toggle('faded', !on);
-    $('#featuredBody').innerHTML = items.length ? items.map(t => toolCardHTML(t, 'featured')).join('')
-      : '<div class="panel"><p class="muted">Nothing published yet.</p></div>';
-    applyImgs($('#featuredBody'));
+    $('#pinnedBody').innerHTML = keys.length ? keys.map(k => { const p = PIN_TOOLS[k]; return `<div class="card pin-card" role="link" tabindex="0" data-pin="${k}" aria-label="Open ${esc(p.title)}">
+        <span class="pin-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p.icon}</svg></span>
+        <div class="pin-txt"><div class="pin-top"><strong>${esc(p.title)}</strong><span class="badge">NEW</span></div><p class="muted">${esc(p.desc)}</p></div>
+        <span class="pin-go" aria-hidden="true">OPEN &rarr;</span></div>`; }).join('')
+      : '<div class="panel"><p class="muted">No tools pinned. Use Edit Section to pin one.</p></div>';
   }
-  function routeTo(kind, id) {
-    const K = KIND[kind] || KIND.tool;
-    if (!isAdmin() && !settings.tabs[K.tab]) return toast('That section is currently unavailable.');
-    showTab(K.tab, { id });
-    focusCard(K, id);
+  function openPinned(k) {
+    if (!PIN_TOOLS[k]) return;
+    if (!isAdmin() && settings.tabs.tab3 === false) return toast('That section is currently unavailable.');
+    showTab('tab3', { id: k });
   }
-  function focusCard(K, id) {
-    requestAnimationFrame(() => {
-      const el = $(`${K.list} .tool-card[data-id="${CSS.escape(id)}"]`);
-      if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1800);
-    });
-  }
-  $('#featuredBody').addEventListener('click', e => {
-    if (e.target.closest('select')) return;
-    const card = e.target.closest('.tool-card'); if (card) routeTo(card.dataset.kind, card.dataset.id);
+  $('#pinnedBody').addEventListener('click', e => { const c = e.target.closest('[data-pin]'); if (c) openPinned(c.dataset.pin); });
+  $('#pinnedBody').addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const c = e.target.closest('[data-pin]'); if (c) { e.preventDefault(); openPinned(c.dataset.pin); }
   });
-  $('#featuredBody').addEventListener('keydown', e => {
-    if (e.target.closest('select')) return;
-    if (e.key === 'Enter' || e.key === ' ') { const card = e.target.closest('.tool-card'); if (card) { e.preventDefault(); routeTo(card.dataset.kind, card.dataset.id); } }
-  });
-  $('#featuredToggle').addEventListener('change', e => { settings.featuredVisible = e.target.checked; save('mway_settings', settings); renderFeatured(); });
-  $('#editFeaturedBtn').addEventListener('click', () => {
-    openModal(`<h3>Edit Section Name</h3><p>The three most recently published or updated tools and bots are shown here automatically.</p>
-      <input id="fLabel" value="${esc(settings.featured.label)}" maxlength="40" placeholder="Latest Tools & Bots">
-      <div class="row"><button class="btn btn-small" id="fc">Cancel</button><button class="btn btn-primary btn-small" id="fs">Save</button></div>`);
-    $('#fc').onclick = closeModal;
-    $('#fs').onclick = () => {
-      const l = $('#fLabel').value.trim(); if (!l) return toast('Section name is required.');
-      settings.featured = { label: l }; save('mway_settings', settings); closeModal(); renderFeatured(); toast('Section renamed.');
+  $('#pinnedToggle').addEventListener('change', e => { settings.pinnedVisible = e.target.checked; save('mway_settings', settings); renderPinned(); });
+  $('#editPinnedBtn').addEventListener('click', () => {
+    openModal(`<h3>Edit Pinned Tools</h3><p>Choose the section name and which CS2 tools are pinned on the Home page.</p>
+      <input id="pLabel" value="${esc(settings.pinnedLabel)}" maxlength="40" placeholder="Newest CS2 Tools">
+      ${Object.keys(PIN_TOOLS).map(k => `<label class="toggle"><input type="checkbox" data-pk="${k}" ${settings.pinned[k] ? 'checked' : ''}> ${esc(PIN_TOOLS[k].title)}</label>`).join('')}
+      <div class="row"><button class="btn btn-small" id="pc">Cancel</button><button class="btn btn-primary btn-small" id="ps">Save</button></div>`);
+    $('#pc').onclick = closeModal;
+    $('#ps').onclick = () => {
+      const l = $('#pLabel').value.trim(); if (!l) return toast('Section name is required.');
+      settings.pinnedLabel = l;
+      $$('#modal [data-pk]').forEach(c => { settings.pinned[c.dataset.pk] = c.checked; });
+      save('mway_settings', settings); closeModal(); renderPinned(); toast('Pinned tools updated.');
     };
   });
 
@@ -735,6 +674,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const steamFallbackUrl = e => e.id ? `https://steamcommunity.com/profiles/${e.id}` : `https://steamcommunity.com/id/${e.vanity}`;
 
   function renderSteam() {
+    $('#steamTitle').textContent = settings.steamTitle;
     const cfg = settings.steamCfg, entries = parseSteamEntries(cfg.accounts), grid = $('#steamGrid');
     if (!entries.length) { grid.innerHTML = '<div class="panel"><p class="muted">No Steam accounts configured.</p></div>'; return; }
     grid.innerHTML = entries.map(e => {
@@ -749,6 +689,18 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         <a class="btn btn-primary" href="${esc(url)}" target="_blank" rel="noopener">View Profile</a></div>`;
     }).join('');
   }
+  function cancelSteamEdit() { $('#steamEdit').classList.add('hidden'); }
+  $('#editSteamBtn').addEventListener('click', () => {
+    $('#steamTitleInput').value = settings.steamTitle; $('#steamEdit').classList.remove('hidden'); $('#steamTitleInput').focus();
+  });
+  $('#cancelSteam').addEventListener('click', cancelSteamEdit);
+  $('#saveSteam').addEventListener('click', () => {
+    if (!isAdmin()) return;
+    const title = $('#steamTitleInput').value.trim();
+    if (!title) return toast('Title cannot be empty.');
+    settings.steamTitle = title; save('mway_settings', settings);
+    renderSteam(); cancelSteamEdit(); toast('Steam section updated.');
+  });
   $('#steamGrid').addEventListener('error', e => {
     const img = e.target;
     if (img && img.tagName === 'IMG' && img.dataset.fb) {
@@ -769,14 +721,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     { u: 'https://api.allorigins.win/get?url={url}', wrap: true },
     { u: 'https://thingproxy.freeboard.io/fetch/{raw}', post: true }
   ];
-  let proxyPref = 0; const rlMap = {};   // v6: per-scope 429 pause ('api' = Steam Web API, 'market' = Steam Market prices) so one scope never blocks the other
+  let proxyPref = 0; const rlMap = {};
   const netErr = (code, message, extra) => Object.assign(new Error(message), { code }, extra);
 
   /* Cloudflare Worker bridge (worker.js). Hosts the Worker will forward (mirrors UPSTREAM_ALLOW in worker.js). */
   const BRIDGE_HOSTS = ['api.steampowered.com', 'steamcommunity.com', 'api-public.cs-prod.leetify.com', 'csfloat.com', 'api.csgofloat.com', 'prices.csgotrader.app', 'open.faceit.com'];
-  /* v11: a bridge saved without the scheme ("mway-bridge.venovfx.workers.dev"), with a path, quotes or spaces used to be rejected as
-     "not valid", which switched the bridge OFF and sent every call through the (blocked) public proxies. It is now repaired: scheme added,
-     path / query removed. An unusable value falls back to BRIDGE_CONFIG.url instead of disabling the bridge. */
   const normBridge = raw => {
     let u = String(raw || '').trim().replace(/^["'<\s]+|["'>\s]+$/g, '');
     if (!u) return '';
@@ -845,7 +794,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (outer) { if (outer.aborted) kill(); else outer.addEventListener('abort', kill, { once: true }); }
     try {
       const r = await fetch(url, Object.assign({ cache: 'no-store', signal: ac.signal }, opts));
-      // v4: also expose Retry-After and the Worker's "stale copy" marker so the inventory code can wait the right time / show a note
       return { status: r.status, text: await r.text(), upstream: r.headers.get('X-Upstream-Status'), retryAfter: r.headers.get('Retry-After'), stale: r.headers.get('X-Mway-Stale') === '1', cachedAt: r.headers.get('X-Mway-Cached-At') };
     } finally { clearTimeout(to); if (outer) outer.removeEventListener('abort', kill); }
   }
@@ -874,7 +822,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
   function summarize(errs, authMsg) {
     errs = (Array.isArray(errs) ? errs : [errs]).filter(Boolean);
-    if (errs.some(e => e.code === 'RATE')) {   // v4: keep the Worker's Retry-After so callers wait as long as Steam asks
+    if (errs.some(e => e.code === 'RATE')) {
       const ra = Math.max(0, ...errs.filter(e => e.code === 'RATE').map(e => e.retryAfter || 0));
       return netErr('RATE', 'Steam is rate limiting this connection. Wait about ' + (ra || 30) + ' seconds and try again.', { retryAfter: ra });
     }
@@ -907,7 +855,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       }
       if (!defin(status, text)) {
         if (status === 401 || status === 403) throw netErr('AUTH', 'HTTP ' + status, { status });
-        if (status === 429) throw netErr('RATE', 'HTTP 429', { status, retryAfter: parseInt(res.retryAfter, 10) || 0 });   // v4: Retry-After from the Worker
+        if (status === 429) throw netErr('RATE', 'HTTP 429', { status, retryAfter: parseInt(res.retryAfter, 10) || 0 });
         if (status < 200 || status >= 300) throw netErr('NET', 'HTTP ' + status, { status });
       }
       let json = null;
@@ -915,7 +863,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         try { json = JSON.parse(text); } catch { throw netErr('NET', 'unreadable response'); }
         if (o.check && !o.check(json)) throw netErr('NET', 'unexpected response');
       }
-      return { status, text, json, via: rt, stale: res.stale ? (Number(res.cachedAt) || Date.now()) : 0 };   // v4: stale = the Worker served a saved copy
+      return { status, text, json, via: rt, stale: res.stale ? (Number(res.cachedAt) || Date.now()) : 0 };
     };
     const run = async (rt, sig) => {
       const t0 = performance.now(), nm = routeName(rt), cat = rt.bridge ? 'bridge' : 'proxy';
@@ -931,7 +879,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const p = (async () => {
       const rlk = o.steamApi ? (o.rl || 'api') : '';
       if (rlk && Date.now() < (rlMap[rlk] || 0)) { const left = Math.ceil((rlMap[rlk] - Date.now()) / 1000); throw netErr('RATE', 'Steam is rate limiting this connection. Wait about ' + left + ' seconds and try again.', { retryAfter: left }); }
-      const routes = (o.direct ? [{ direct: true }] : []).concat(o.legacy ? legacyList() : proxyList(url));   // v7: o.legacy = public proxies only
+      const routes = (o.direct ? [{ direct: true }] : []).concat(o.legacy ? legacyList() : proxyList(url));
       try {
         const r = await raceRoutes(routes, run, { stagger: o.stagger || 2200, total: o.total || 12000 });
         if (r.via && !r.via.direct && !settings.steamCfg.proxy) { const i = PROXIES.indexOf(r.via); if (i >= 0) proxyPref = i; }
@@ -957,7 +905,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (local && !bridgeHoldsKey()) q.append('key', cfg.key);   // when the bridge holds STEAM_API_KEY the browser key is never sent
     const r = await proxyReq(`https://api.steampowered.com/${path}/?${q}`, {
       json: true, steamApi: true, ttl: o.ttl == null ? 120000 : o.ttl, timeout: 7000, total: 11000,
-      definitive: o.definitive,   // v10: lets a caller accept a 401/403 as a final answer (private friends list) instead of an error
+      definitive: o.definitive,
       check: j => !!j && typeof j === 'object'
     });
     return r.json;
@@ -1022,14 +970,14 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
   function readSteamInputs() {
     const cfg = settings.steamCfg;
-    const keysBefore = { steam: cfg.key, csfloat: cfg.floatKey, leetify: cfg.leetifyKey, faceit: cfg.faceitKey};   // v4
+    const keysBefore = { steam: cfg.key, csfloat: cfg.floatKey, leetify: cfg.leetifyKey, faceit: cfg.faceitKey};
     cfg.key = $('#stKey').value.trim(); cfg.proxy = $('#stProxy').value.trim(); cfg.accounts = $('#stIds').value;
     cfg.bridge = normBridge($('#stBridge').value) || $('#stBridge').value.trim().replace(/\/+$/, ''); cfg.bridgeOnly = $('#stBridgeOnly').checked;
     cfg.faceitKey = $('#stFaceit').value.trim();
     if ($('#stFaceitName')) cfg.faceitKeyName = $('#stFaceitName').value.trim();
     cfg.floatKey = $('#stFloat').value.trim(); cfg.hltvKey = $('#stHltvKey').value.trim(); cfg.hltvUrl = $('#stHltvUrl').value.trim(); cfg.leetifyKey = $('#stLeetify').value.trim();
     save('mway_settings', settings);
-    keysAfterRead(keysBefore);   // v4: send changed keys to the Worker automatically
+    keysAfterRead(keysBefore);
   }
   const stStatus = (msg, bad) => { const s = $('#stStatus'); s.textContent = msg; s.style.color = bad ? 'var(--danger)' : ''; };
 
@@ -1090,331 +1038,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const i = $(b.dataset.reveal), show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.textContent = show ? 'Hide' : 'Show';
   }));
 
-  /* ---------- Quick download buttons (always latest active version) ---------- */
-  function renderQuick() {
-    const a = isAdmin();
-    $('#quickBtns').innerHTML = settings.quick.map((q, i) => {
-      const on = q.visible !== false;
-      if (!on && !a) return '';
-      const t = findItem(q.toolId), lv = t && t.status !== 'contact' ? latestActive(t) : null;
-      return `<div class="quick${on ? '' : ' faded'}"><button class="btn btn-wide" data-q="${i}">${esc(q.label)}</button>
-        ${lv ? `<span class="muted quick-ver">Latest: ${esc(lv.v)}</span>` : ''}
-        ${a ? `<div class="quick-tools"><label class="toggle"><input type="checkbox" data-qv="${i}" ${on ? 'checked' : ''}> Visible to visitors</label><button class="btn btn-small" data-qe="${i}">Edit</button></div>` : ''}</div>`;
-    }).join('');
-  }
-  $('#quickBtns').addEventListener('change', e => {
-    const c = e.target.closest('[data-qv]'); if (!c || !isAdmin()) return;
-    settings.quick[+c.dataset.qv].visible = c.checked; save('mway_settings', settings); renderQuick();
-  });
-  $('#quickBtns').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.q !== undefined) {
-      const tool = findItem(settings.quick[+b.dataset.q].toolId);
-      if (!tool || (tool.status === 'unlisted' && !isAdmin())) return toast('This download is not available right now.');
-      return startDownload(tool);
-    }
-    if (b.dataset.qe !== undefined) {
-      const i = +b.dataset.qe, q = settings.quick[i];
-      const optsFor = arr => arr.map(t => `<option value="${esc(t.id)}" ${t.id === q.toolId ? 'selected' : ''}>${esc(t.title)} [${esc(t.id)}]${t.status !== 'listed' ? ' (' + t.status + ')' : ''}</option>`).join('');
-      openModal(`<h3>Edit Quick Button ${i + 1}</h3><p>Choose the label and the tool or bot it downloads. It always downloads the latest active version.</p>
-        <input id="qLabel" value="${esc(q.label)}" maxlength="40" placeholder="Button label">
-        <select id="qTool"><option value="">- Nothing linked -</option><optgroup label="Tools">${optsFor(tools)}</optgroup><optgroup label="Bots">${optsFor(bots)}</optgroup></select>
-        <div class="row"><button class="btn btn-small" id="qc">Cancel</button><button class="btn btn-primary btn-small" id="qs">Save</button></div>`);
-      $('#qc').onclick = closeModal;
-      $('#qs').onclick = () => {
-        const l = $('#qLabel').value.trim(); if (!l) return toast('Label is required.');
-        settings.quick[i] = { label: l, toolId: $('#qTool').value, visible: q.visible !== false };
-        save('mway_settings', settings); closeModal(); renderQuick(); toast('Quick button updated.');
-      };
-    }
-  });
-
-    /* =====================================================================
-     7. TOOL FORM (publish panel + edit modal), including version editor
-     ===================================================================== */
-  const FONTS = {
-    default: ['Default', 'inherit'],
-    mono: ['Monospace', 'font-family:"SF Mono",Consolas,Menlo,monospace'],
-    serif: ['Serif', 'font-family:Georgia,"Times New Roman",serif'],
-    condensed: ['Bold Condensed', 'font-family:"Arial Narrow",Impact,sans-serif;font-weight:800;letter-spacing:.04em'],
-    italic: ['Italic', 'font-style:italic'],
-    cursive: ['Cursive', 'font-family:"Brush Script MT","Segoe Script",cursive;font-size:1.25em']
-  };
-  const BSTYLES = { solid: 'Solid', outline: 'Outline', dashed: 'Dashed', pill: 'Pill' };
-  const pend = {}; // per-form pending state: uploads, version rows, author stamp
-
-  const colorField = (id, val, ph) =>
-    `<div class="field"><input id="${id}" value="${esc(val)}" placeholder="${ph}"><input type="color" data-sync="${id}" value="${/^#[0-9a-f]{6}$/i.test(val) ? val : '#5b8def'}"></div>`;
-  const opts = (map, cur, pick) => Object.keys(map).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(pick ? pick(map[k]) : map[k])}</option>`).join('');
-  const shown = (v, name) => v && v.startsWith('data:') ? '[uploaded] ' + (name || 'stored file') : (v || '');
-
-  function formHTML(p, t = {}) {
-    const b = t.badge || {}, au = t.author || { stamp: false, text: '' };
-    pend[p] = { versions: (t.versions || []).map(v => Object.assign({}, v)), stamp: !!au.stamp };
-    return `<div class="form-grid">
-      <div><span class="flabel">Title</span><input id="${p}Title" value="${esc(t.title)}" placeholder="Title"></div>
-      <div><span class="flabel">Description</span><input id="${p}Desc" value="${esc(t.desc)}" placeholder="Short description"></div>
-      <div><span class="flabel">Image URL / Upload</span><div class="field"><input id="${p}Img" value="${esc(shown(t.img, 'image'))}" placeholder="https://..."><label class="btn btn-small">Upload<input type="file" accept="image/*" hidden data-up="img" data-p="${p}"></label></div></div>
-      <div><span class="flabel">Action Status</span><select id="${p}Status">${opts({ listed: 'Listed', unlisted: 'Unlisted', contact: 'CONTACT DEV' }, t.status || 'listed')}</select></div>
-      <div><span class="flabel">Title Font Style</span><select id="${p}Font">${opts(FONTS, t.font || 'default', v => v[0])}</select></div>
-      <div><span class="flabel">Title Color (hex or name)</span>${colorField(p + 'Color', t.titleColor || '', '#e8edf4')}</div>
-      <div><span class="flabel">Role Badge Text</span><input id="${p}BText" value="${esc(b.text)}" placeholder="e.g. DEV TOOL (blank = none)"></div>
-      <div><span class="flabel">Badge Border Style</span><select id="${p}BStyle">${opts(BSTYLES, b.style || 'solid')}</select></div>
-      <div><span class="flabel">Badge Background</span>${colorField(p + 'BBg', b.bg || '#1b2a4a', '#1b2a4a')}</div>
-      <div><span class="flabel">Badge Text / Border Color</span>${colorField(p + 'BColor', b.color || '#8fb2ff', '#8fb2ff')}</div>
-      <div class="span2"><span class="flabel">Author</span>
-        <div class="field"><input id="${p}Author" value="${esc(au.text)}" maxlength="40" placeholder="Custom author name" ${au.stamp ? 'disabled' : ''}>
-        <button type="button" class="btn btn-small" data-astamp="${p}" aria-pressed="${au.stamp ? 'true' : 'false'}">MWAY LABS stamp: ${au.stamp ? 'ON' : 'OFF'}</button></div></div>
-    </div>
-    <div class="ver-box">
-      <div class="panel-head"><span class="flabel">Versions and download files</span><button type="button" class="btn btn-small" data-vadd="${p}">+ Add version</button></div>
-      <div id="${p}Vers" class="ver-list"></div>
-    </div>`;
-  }
-  function mountForm(container, p, t) { container.innerHTML = formHTML(p, t); renderVerRows(p); }
-
-  function renderVerRows(p) {
-    const box = $('#' + p + 'Vers'); if (!box) return;
-    const vs = pend[p].versions;
-    box.innerHTML = vs.length ? vs.map((v, i) => `
-      <div class="ver-row" data-p="${p}" data-i="${i}">
-        <input class="v-name" value="${esc(v.v)}" placeholder="V0.7" maxlength="24" aria-label="Version name">
-        <input class="v-file" value="${esc(shown(v.file, v.fileName))}" placeholder="File URL or upload" aria-label="File path or URL">
-        <label class="btn btn-small">Upload<input type="file" hidden data-vup></label>
-        <label class="toggle"><input type="checkbox" class="v-off" ${v.available ? '' : 'checked'}> Unavailable</label>
-        <button type="button" class="btn btn-small btn-danger" data-vdel>Remove</button>
-      </div>`).join('') : '<p class="muted">No versions yet. Add one to enable downloads.</p>';
-  }
-
-  function readForm(p, base = {}) {
-    const v = id => $('#' + p + id).value.trim(), pd = pend[p] || { versions: [] };
-    const title = v('Title'); if (!title) { toast('Title is required.'); return null; }
-    const color = v('Color'); if (color && !okColor(color)) { toast('Invalid title color.'); return null; }
-    const bBg = v('BBg'), bCol = v('BColor');
-    if (!okColor(bBg) || !okColor(bCol)) { toast('Invalid badge color.'); return null; }
-    const versions = [], seen = new Set();
-    for (const r of pd.versions) {
-      const name = (r.v || '').trim();
-      if (!name && !r.file) continue;
-      if (!name) { toast('Every version with a file needs a version name.'); return null; }
-      const k = name.toLowerCase();
-      if (seen.has(k)) { toast(`Duplicate version "${name}".`); return null; }
-      seen.add(k);
-      versions.push({ v: name, file: r.file || '', fileName: r.fileName || '', available: r.available !== false });
-    }
-    const img = v('Img'), upImg = img.startsWith('[uploaded]');
-    return {
-      title, desc: v('Desc'),
-      img: upImg ? (pd.img || base.img || '') : img,
-      status: v('Status'), font: v('Font'), titleColor: color,
-      badge: { text: v('BText'), style: v('BStyle'), bg: bBg, color: bCol },
-      author: { stamp: !!pd.stamp, text: v('Author') },
-      versions
-    };
-  }
-
-  document.addEventListener('input', e => {
-    const el = e.target, s = el.dataset && el.dataset.sync;
-    if (s) { $('#' + s).value = el.value; return; }
-    const row = el.closest && el.closest('.ver-row'); if (!row) return;
-    const m = pend[row.dataset.p] && pend[row.dataset.p].versions[+row.dataset.i]; if (!m) return;
-    if (el.classList.contains('v-name')) m.v = el.value;
-    else if (el.classList.contains('v-file')) { m.file = el.value.trim(); m.fileName = ''; }
-  });
-  document.addEventListener('change', e => {
-    const el = e.target;
-    if (el.classList && el.classList.contains('v-off')) {
-      const row = el.closest('.ver-row'), m = pend[row.dataset.p].versions[+row.dataset.i];
-      if (m) m.available = !el.checked; return;
-    }
-    if (el.classList && el.classList.contains('ver-select')) {
-      const card = el.closest('.tool-card'); if (card) selVer[card.dataset.id] = el.value; return;
-    }
-    const f = el.files && el.files[0]; if (!f) return;
-    const isVer = el.hasAttribute('data-vup'), k = isVer ? 'file' : el.dataset.up;
-    if (!isVer && !k) return;
-    const max = k === 'img' ? 600 * 1024 : 1024 * 1024;
-    if (f.size > max) { el.value = ''; return toast(`File too large for local storage (max ${Math.round(max / 1024)} KB).`); }
-    const r = new FileReader();
-    r.onload = () => {
-      if (isVer) {
-        const row = el.closest('.ver-row'), m = pend[row.dataset.p].versions[+row.dataset.i];
-        if (!m) return;
-        m.file = r.result; m.fileName = f.name; row.querySelector('.v-file').value = '[uploaded] ' + f.name;
-      } else {
-        pend[el.dataset.p].img = r.result; $('#' + el.dataset.p + 'Img').value = '[uploaded] ' + f.name;
-      }
-    };
-    r.readAsDataURL(f);
-  });
-  document.addEventListener('click', e => {
-    const add = e.target.closest('[data-vadd]');
-    if (add) { const p = add.dataset.vadd; pend[p].versions.push({ v: '', file: '', fileName: '', available: true }); renderVerRows(p); const rows = $$(`#${p}Vers .v-name`); if (rows.length) rows[rows.length - 1].focus(); return; }
-    const del = e.target.closest('[data-vdel]');
-    if (del) { const row = del.closest('.ver-row'); pend[row.dataset.p].versions.splice(+row.dataset.i, 1); renderVerRows(row.dataset.p); return; }
-    const st = e.target.closest('[data-astamp]');
-    if (st) {
-      const p = st.dataset.astamp; pend[p].stamp = !pend[p].stamp;
-      st.setAttribute('aria-pressed', pend[p].stamp ? 'true' : 'false'); st.textContent = 'MWAY LABS stamp: ' + (pend[p].stamp ? 'ON' : 'OFF');
-      $('#' + p + 'Author').disabled = pend[p].stamp;
-    }
-  });
-
   /* =====================================================================
-     8. TOOLS: rendering, downloads, audit logging
+     9. ADMIN TAB: users, one-time passwords, nav labels
      ===================================================================== */
-  function badgeHTML(b) {
-    if (!b || !b.text) return '';
-    const bg = okColor(b.bg) ? b.bg : '#1b2a4a', c = okColor(b.color) ? b.color : '#8fb2ff', st = BSTYLES[b.style] ? b.style : 'solid';
-    let css = `color:${c};background:${bg};border:1px solid ${c};`;
-    if (st === 'outline') css = `color:${c};background:transparent;border:1px solid ${c};`;
-    if (st === 'dashed') css += 'border-style:dashed;';
-    if (st === 'pill') css += 'border-radius:999px;';
-    return `<span class="role-badge" style="${esc(css)}">${esc(b.text)}</span>`;
-  }
-  const authorHTML = a => !a ? '' : a.stamp ? '<span class="author-stamp">MWAY LABS</span>' : a.text ? `<span class="author-line">by ${esc(a.text)}</span>` : '';
-  function pickSel(t) {
-    const cur = t.versions.find(v => v.v === selVer[t.id] && v.available);
-    if (cur) return cur.v;
-    const l = latestActive(t); return l ? l.v : '';
-  }
-  function applyImgs(root) {
-    root.querySelectorAll('.tool-img').forEach(el => { if (el.dataset.img) el.style.backgroundImage = `url(${JSON.stringify(el.dataset.img)})`; });
-  }
-
-  function toolCardHTML(t, mode) {
-    const a = isAdmin(), feat = mode === 'featured', kind = kindOf(t);
-    const tstyle = (t.titleColor && okColor(t.titleColor) ? `color:${t.titleColor};` : '') + (FONTS[t.font] ? (FONTS[t.font][1] === 'inherit' ? '' : FONTS[t.font][1]) : '');
-    const vs = sortedVers(t), latest = latestActive(t), sel = pickSel(t);
-    const verUI = (t.status !== 'contact' && vs.length)
-      ? `<label class="ver-wrap"><span class="flabel">Version</span><select class="ver-select" aria-label="Select version">${vs.map(v =>
-        `<option value="${esc(v.v)}" ${v.available ? '' : 'disabled'} ${v.v === sel ? 'selected' : ''}>${esc(v.v)}${latest && v === latest ? ' (latest)' : ''}${v.available ? '' : ' - unavailable'}</option>`).join('')}</select></label>`
-      : '';
-    const noActive = vs.length && !latest;
-    let action;
-    if (t.status === 'contact') action = '<button class="btn btn-contact" data-act="contact">CONTACT DEV</button>';
-    else if (feat) action = '<button class="btn btn-primary btn-small" data-act="route">View in ' + KIND[kind].label + 's</button>';
-    else action = `<button class="btn btn-primary btn-small" data-act="download" ${noActive ? 'disabled' : ''}>${noActive ? 'No active version' : 'Download'}</button>`;
-    return `<div class="card tool-card ${feat ? 'featured' : ''} ${t.status === 'unlisted' ? 'unlisted' : ''}" data-id="${esc(t.id)}" data-kind="${kind}" ${feat ? 'tabindex="0" role="link" aria-label="Open ' + esc(t.title) + ' in ' + KIND[kind].tab + '"' : ''}>
-      <div class="tool-img" data-img="${esc(t.img)}">${t.img ? '' : 'NO IMAGE'}</div>
-      <div class="tool-body">
-        <h3 style="${esc(tstyle)}">${esc(t.title)}${feat ? ' <span class="badge">' + KIND[kind].label.toUpperCase() + '</span>' : ''}${t.status === 'unlisted' ? ' <span class="badge">UNLISTED</span>' : ''}</h3>
-        ${authorHTML(t.author)}
-        ${((x) => x ? '<div class="badge-row">' + x + '</div>' : '')(badgeHTML(t.badge) + rateBadge(t.id))}
-        <p>${esc(t.desc)}</p>
-        ${verUI}
-        ${action}
-        ${session && !feat ? '<button class="btn btn-small" data-act="rate">Rate</button>' : ''}
-        ${a && !feat ? `<div class="tool-admin">
-          <button class="btn btn-small" data-act="edit">Edit</button>
-          <button class="btn btn-small btn-danger" data-act="remove">Remove</button>
-          <button class="btn btn-small" data-act="toggle">${t.status === 'listed' ? 'Unlist' : 'List'}</button>
-        </div>` : ''}
-      </div></div>`;
-  }
-
-  function renderList(kind) {
-    const a = isAdmin(), box = $(KIND[kind].list);
-    const visible = getArr(kind).filter(t => a || t.status !== 'unlisted');
-    if (!visible.length) box.innerHTML = `<div class="panel"><p class="muted">No ${KIND[kind].label.toLowerCase()}s available right now.</p></div>`;
-    else { box.innerHTML = visible.map(t => toolCardHTML(t, 'grid')).join(''); applyImgs(box); }
-  }
-  function renderLists() { renderList('tool'); renderList('bot'); }
-  function refreshTools() { renderLists(); renderFeatured(); renderQuick(); renderHub(); }
-
-  const UAS = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) Safari/605.1.15',
-    'Mozilla/5.0 (X11; Linux x86_64) Firefox/125.0', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Mobile Safari/604.1', 'Mozilla/5.0 (Android 14; Mobile) Chrome/124.0'];
-
-  function logDownload(tool, ver, ev) {
-    logs.unshift({
-      t: new Date().toISOString(), ev: ev || 'DOWNLOAD', tool: tool.title, ver: ver ? ver.v : '-',
-      ip: `10.${rnd(256)}.${rnd(256)}.${1 + rnd(254)}`, host: `client-${makeSalt().slice(0, 5)}.mock.local`,
-      ua: UAS[rnd(UAS.length)], port: 49152 + rnd(16384)
-    });
-    logs = logs.slice(0, 200); save('mway_logs', logs); renderLogs();
-  }
-
-  /* ver === undefined -> latest active version. opts.admin bypasses availability (master hub). */
-  function startDownload(tool, ver, o = {}) {
-    if (tool.status === 'contact' && !o.admin) return contactModal();
-    if (ver === undefined) ver = latestActive(tool);
-    if (!o.admin && tool.versions.length && (!ver || !ver.available)) return toast('No active version is available for this tool.');
-    logDownload(tool, ver, o.admin ? 'ADMIN-DL' : 'DOWNLOAD');
-    const label = ver ? `${tool.title} ${ver.v}` : tool.title;
-    if (ver && ver.file) {
-      const a = document.createElement('a');
-      a.href = ver.file; a.target = '_blank'; a.rel = 'noopener';
-      if (ver.file.startsWith('data:')) a.download = ver.fileName || 'download';
-      document.body.appendChild(a); a.click(); a.remove();
-      toast(`Download started: ${label}`);
-    } else {
-      alertModal('Download Simulation', `"${label}" - no file attached yet. This is a simulated download.`);
-    }
-  }
-
-  function contactModal() {
-    openModal(`<h3>Contact Developer</h3><p>Direct download is disabled for this tool. Reach out to the developer to request access.</p>
-      <div class="row"><button class="btn btn-small" id="cc">Close</button><a class="btn btn-contact btn-small" href="${esc(settings.discord)}" target="_blank" rel="noopener">Open Discord</a></div>`);
-    $('#cc').onclick = closeModal;
-  }
-
-  function bindList(kind) {
-    const K = KIND[kind];
-    $(K.list).addEventListener('click', e => {
-      const btn = e.target.closest('[data-act]'); if (!btn) return;
-      const card = btn.closest('.tool-card'), id = card.dataset.id, act = btn.dataset.act;
-      const item = getArr(kind).find(t => t.id === id);
-      if (!item) return;
-      if (act === 'download') {
-        const sel = card.querySelector('.ver-select');
-        return startDownload(item, sel ? item.versions.find(v => v.v === sel.value) || null : undefined);
-      }
-      if (act === 'contact') return contactModal();
-      if (act === 'rate') return session ? rateModal(item) : undefined;
-      if (!isAdmin()) return;
-      if (act === 'toggle') {
-        item.status = item.status === 'listed' ? 'unlisted' : 'listed'; save(K.store, getArr(kind)); refreshTools();
-        toast(item.status === 'listed' ? `${K.label} is now listed.` : `${K.label} unlisted (hidden from visitors).`);
-      } else if (act === 'remove') {
-        openModal(`<h3>Remove ${K.label}</h3><p>Permanently delete "${esc(item.title)}" and all its versions?</p>
-          <div class="row"><button class="btn btn-small" id="no">Cancel</button><button class="btn btn-small btn-danger" id="yes">Remove</button></div>`);
-        $('#no').onclick = closeModal;
-        $('#yes').onclick = () => {
-          setArr(kind, getArr(kind).filter(t => t.id !== id)); reviews = reviews.filter(r => r.item !== id); save('mway_reviews', reviews);
-          let q = false; settings.quick.forEach(x => { if (x.toolId === id) { x.toolId = ''; q = true; } });
-          if (q) save('mway_settings', settings);
-          closeModal(); refreshTools(); toast(`${K.label} removed.`);
-        };
-      } else if (act === 'edit') {
-        openModal(`<h3>Edit ${K.label}</h3><div id="eMount"></div>
-          <div class="row"><button class="btn btn-small" id="eCancel">Cancel</button><button class="btn btn-primary btn-small" id="eSave">Save</button></div>`, { wide: true });
-        mountForm($('#eMount'), 'e', item);
-        $('#eCancel').onclick = closeModal;
-        $('#eSave').onclick = () => {
-          const d = readForm('e', item); if (!d) return;
-          Object.assign(item, d, { updated: Date.now() }); save(K.store, getArr(kind)); closeModal(); refreshTools(); toast(`${K.label} updated.`);
-        };
-      }
-    });
-    mountForm($(K.form), K.pfx);
-    $(kind === 'bot' ? '#botPublishBtn' : '#publishBtn').addEventListener('click', () => {
-      const d = readForm(K.pfx); if (!d) return;
-      setArr(kind, [Object.assign({ id: kind + '-' + Date.now(), updated: Date.now() }, d)].concat(getArr(kind)));
-      mountForm($(K.form), K.pfx); refreshTools(); toast(`${K.label} published.`);
-    });
-  }
-  bindList('tool'); bindList('bot');
-
-  /* =====================================================================
-     9. ADMIN TAB: logs, users, one-time passwords, file hub, nav labels
-     ===================================================================== */
-  function renderLogs() {
-    const t = $('#terminal');
-    t.innerHTML = logs.length ? logs.map(l =>
-      `<div class="ln"><span class="ts">[${esc(fmtTime(l.t))}]</span> <span class="ev ${l.ev === 'ADMIN-DL' ? 'adm' : ''}">${esc(l.ev || 'DOWNLOAD')}</span> "${esc(l.tool)}" ver=${esc(l.ver || '-')} host=${esc(l.host)} ip=${esc(l.ip)} port=${esc(l.port)} ua="${esc(l.ua)}"</div>`).join('')
-      : '<div class="empty">$ awaiting events... no downloads logged yet.</div>';
-  }
-
   function renderUsers() {
     $('#umBody').innerHTML = [`<tr><td>${MASTER}</td><td>master</td><td class="mono">(protected)</td><td class="mono">-</td><td></td></tr>`].concat(users.map(u =>
       `<tr><td>${esc(u.u)}</td><td>${esc(u.role)}${u.otp ? ' <span class="badge">TEMP PW</span>' : ''}</td>
@@ -1459,35 +1085,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   $('#otpDismiss').addEventListener('click', () => wipeOtp('Secret wiped.'));
   window.addEventListener('pagehide', () => wipeOtp());
 
-  /* Central master file hub (tools + bots) */
-  function renderHub() {
-    [['tool', '#hubGridTools'], ['bot', '#hubGridBots']].forEach(([k, sel]) => {
-      const g = $(sel), items = getArr(k);
-      if (!items.length) { g.innerHTML = '<p class="muted">Nothing published yet.</p>'; return; }
-      g.innerHTML = items.map(t => {
-        const vs = sortedVers(t);
-        return `<div class="hub-card">
-          <div class="hub-head"><strong>${esc(t.title)}</strong><span class="badge">${esc(k.toUpperCase())} / ${esc(t.status.toUpperCase())}</span></div>
-          ${authorHTML(t.author)}
-          <div class="hub-vers">${vs.length ? vs.map(v => `
-            <div class="hub-ver ${v.available ? '' : 'off'}">
-              <div><span class="hv-name">${esc(v.v)}</span> <span class="muted">${v.available ? 'active' : 'unavailable'}</span>
-                <div class="muted hv-file">${esc(fileLabel(v))}</div></div>
-              <button class="btn btn-small" data-hub="${esc(t.id)}" data-ver="${esc(v.v)}">Download</button>
-            </div>`).join('') : '<div class="muted">No versions on file.</div>'}</div>
-        </div>`;
-      }).join('');
-    });
-  }
-  ['#hubGridTools', '#hubGridBots'].forEach(s => $(s).addEventListener('click', e => {
-    const b = e.target.closest('[data-hub]'); if (!b || !isAdmin()) return;
-    const tool = findItem(b.dataset.hub); if (!tool) return;
-    const ver = tool.versions.find(v => v.v === b.dataset.ver); if (!ver) return;
-    startDownload(tool, ver, { admin: true });
-  }));
-
   /* Navigation renaming center (HOME is hard-locked and never touched) */
-  const NAV_INPUTS = { tools: '#nlTools', bots: '#nlBots', roadmap: '#nlRoadmap', tab3: '#nlTab3', phone: '#nlPhone' };
+  const NAV_INPUTS = { roadmap: '#nlRoadmap', tab3: '#nlTab3' };
   function renderNavInputs() { Object.keys(NAV_INPUTS).forEach(k => { $(NAV_INPUTS[k]).value = settings.navLabels[k]; }); }
   $('#saveNav').addEventListener('click', () => {
     const vals = {}; Object.keys(NAV_INPUTS).forEach(k => { vals[k] = $(NAV_INPUTS[k]).value.trim(); });
@@ -1514,7 +1113,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#stFaceit').value = fcg.faceitKey || ''; $('#gsToken').value = gsToken(); gsStatus(GS.msg || gsIdleMsg(), GS.bad);
     $('#stFloat').value = settings.steamCfg.floatKey || ''; $('#stHltvKey').value = settings.steamCfg.hltvKey || ''; $('#stHltvUrl').value = settings.steamCfg.hltvUrl || ''; $('#stLeetify').value = settings.steamCfg.leetifyKey || '';
     stStatus(settings.steamCfg.last ? 'Last sync: ' + fmtTime(settings.steamCfg.last) : 'Not synced yet. Showing profile links only.');
-    renderLogs(); renderUsers(); renderHub(); renderReviews(); renderMailing(); renderRmRows(); diagBadge();
+    renderUsers(); renderMailing(); renderRmRows(); diagBadge();
   }
 
   $('#saveDiscord').addEventListener('click', () => {
@@ -1526,7 +1125,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   $$('[data-tabkey]').forEach(c => c.addEventListener('change', () => {
     settings.tabs[c.dataset.tabkey] = c.checked; save('mway_settings', settings); applySettings();
   }));
-  $('#clearLogs').addEventListener('click', () => { logs = []; save('mway_logs', logs); renderLogs(); toast('Audit log cleared.'); });
 
   $('#umGen').addEventListener('click', () => { $('#umPw').value = genPassword(); });
   $('#umCreate').addEventListener('click', async () => {
@@ -1628,7 +1226,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
      ===================================================================== */
   const EMAIL_RE = /^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
   function mailModal() {
-    openModal(`<h3>Join Mailing List</h3><p>Get notified about new tools, bots and releases. No spam.</p>
+    openModal(`<h3>Join Mailing List</h3><p>Get notified about new tools and releases. No spam.</p>
       <input id="mlEmail" type="email" placeholder="you@example.com" autocomplete="email" maxlength="120" aria-label="Email address">
       <div class="error" id="mlErr"></div>
       <div class="row"><button class="btn btn-small" id="mlCancel">Cancel</button><button class="btn btn-primary btn-small" id="mlGo">Subscribe</button></div>`);
@@ -1738,49 +1336,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
 
   /* =====================================================================
-     12b. RATINGS: submit, moderate, badge
-     ===================================================================== */
-  const ICO = f => `<svg viewBox="0 0 24 24" width="14" height="14" fill="${f ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V5z"/><circle cx="12" cy="10" r="2" fill="${f ? '#0b0e13' : 'currentColor'}" stroke="none"/><path d="M12 12v4" stroke="${f ? '#0b0e13' : 'currentColor'}"/></svg>`;
-  function rateBadge(id) {
-    const a = reviews.filter(r => r.item === id && r.st === 'approved'); if (!a.length) return '';
-    const v = a.reduce((s, r) => s + r.n, 0) / a.length;
-    return `<span class="rate-badge" title="${v.toFixed(1)} / 5 from ${a.length} review(s)">${ICO(1)} ${v.toFixed(1)}</span>`;
-  }
-  function rateModal(item) {
-    const mine = reviews.find(r => r.item === item.id && r.u === session.u); let n = mine ? mine.n : 0;
-    openModal(`<h3>Rate ${esc(item.title)}</h3><p>${mine ? 'Your rating is ' + esc(mine.st) + '. Submitting again replaces it and sends it for approval.' : 'Ratings go live after admin approval.'}</p>
-      <div class="rate-pick" id="rp">${[1, 2, 3, 4, 5].map(i => `<button type="button" class="rp" data-n="${i}" aria-label="${i} of 5"></button>`).join('')}</div>
-      <textarea id="rc" rows="3" maxlength="280" placeholder="Optional comment (seen by admins only)">${esc(mine ? mine.c : '')}</textarea>
-      <div class="row"><button class="btn btn-small" id="rx">Cancel</button><button class="btn btn-primary btn-small" id="rs">Submit</button></div>`);
-    const paint = () => $$('#rp .rp').forEach((b, i) => { b.innerHTML = ICO(i < n).replace('width="14" height="14"', ''); b.classList.toggle('on', i < n); });
-    paint(); $('#rp').onclick = e => { const b = e.target.closest('.rp'); if (b) { n = +b.dataset.n; paint(); } };
-    $('#rx').onclick = closeModal;
-    $('#rs').onclick = () => {
-      if (!n) return toast('Pick a rating from 1 to 5.');
-      reviews = reviews.filter(r => !(r.item === item.id && r.u === session.u));
-      reviews.push({ id: 'r' + Date.now(), item: item.id, title: item.title, kind: kindOf(item), u: session.u, n, c: $('#rc').value.trim(), st: 'pending', ts: new Date().toISOString() });
-      save('mway_reviews', reviews); closeModal(); refreshTools(); renderReviews(); toast('Thanks! Your rating awaits admin approval.');
-    };
-  }
-  let rvF = 'pending';
-  function renderReviews() {
-    const p = reviews.filter(r => r.st === 'pending').length, d = $('#rvDot');
-    $('#rvCount').textContent = p + ' PENDING'; d.textContent = p; d.classList.toggle('hidden', !p);
-    $$('#rvFilter [data-f]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.f === rvF)));
-    const l = reviews.filter(r => rvF === 'all' || r.st === rvF).sort((a, b) => b.ts.localeCompare(a.ts));
-    $('#rvBody').innerHTML = l.length ? l.map(r => `<tr><td>${esc(r.title)} <span class="badge">${esc(r.kind.toUpperCase())}</span></td><td>${esc(r.u)}</td><td><span class="rate-badge">${ICO(1)} ${r.n}/5</span></td><td>${esc(r.c) || '-'}</td><td class="mono">${esc(r.ts.slice(0, 10))}</td><td>${esc(r.st)}</td>
-      <td class="act">${r.st !== 'approved' ? `<button class="btn btn-small" data-rv="approved" data-id="${esc(r.id)}">Accept</button>` : ''}${r.st !== 'rejected' ? `<button class="btn btn-small" data-rv="rejected" data-id="${esc(r.id)}">Reject</button>` : ''}<button class="btn btn-small btn-danger" data-rv="del" data-id="${esc(r.id)}">Delete</button></td></tr>`).join('')
-      : '<tr><td colspan="7" class="muted">Nothing here.</td></tr>';
-  }
-  $('#rvFilter').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (b) { rvF = b.dataset.f; renderReviews(); } });
-  $('#rvBody').addEventListener('click', e => {
-    const b = e.target.closest('[data-rv]'); if (!b || !isAdmin()) return;
-    if (b.dataset.rv === 'del') reviews = reviews.filter(r => r.id !== b.dataset.id);
-    else { const r = reviews.find(x => x.id === b.dataset.id); if (r) r.st = b.dataset.rv; }
-    save('mway_reviews', reviews); renderReviews(); refreshTools();
-  });
-
-  /* =====================================================================
      12c. CS2 CROSSHAIR GENERATOR   (v5: September 2026 "Rush Hour" pixel engine, build 1.41.8.8+)
      - Length / thickness / gap are INTEGER pixels at the 1280x720 reference. The engine scales them linearly with the chosen
        reference height (2 px at 720p = 4 px at 1440p), which mimics CS2's own proportional scaling. At 1280x720 one slider
@@ -1873,13 +1428,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     });
     return { c: xhNorm(o), n };
   }
-  /* ---- v6: share-code import --------------------------------------------------------------------------------------------
-     Two formats are understood:
-       1. This generator's own codes ("CS" + 44 characters): exact inverse of xhCode(), checksum verified.
-       2. Classic in-game codes ("CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx", 25 characters, 18 bytes), decoded with the long-standing
-          field layout. Classic values (size / thickness / gap) were on the old arbitrary scale, so they are converted with an
-          approximate factor (XCLASSIC_PX px per old unit at 1280x720): re-tune with the sliders. Valve changed the format again
-          in September 2026, so the checksum is checked and anything that does not decode cleanly is rejected, never guessed. */
   const XCLASSIC_PX = 1.3, XPAL = [[250, 50, 50], [50, 250, 50], [250, 250, 50], [50, 50, 250], [50, 250, 250]], XCSTY = [0, 4, 2, 2, 4, 4];
   const xhHex = a => '#' + a.map(n => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0')).join('');
   const xhBytes = (n, len) => { const h = n.toString(16).padStart(len * 2, '0'); return h.length > len * 2 ? null : h.match(/../g).map(x => parseInt(x, 16)); };
@@ -1912,8 +1460,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return { c: xhNorm(c), classic: true, note: 'Imported a classic code. Length, thickness and gap were converted from the old scale to pixels (approximate): fine-tune them with the sliders, and check the result in game.' };
   }
 
-  /* ---- v7: map backdrops. Real screenshots (1:1 with the preview canvas) are loaded from the self-hosted paths below; put your
-     files in img/maps/ (or swap in https URLs). Until an image has loaded (or if a file is missing) the built-in SVG scene is shown. ---- */
   const XH_MAP_PHOTOS = {
     dust: ['img/maps/dust2_a.jpg', 'img/maps/dust2_mid.jpg'],
     nuke: ['img/maps/nuke_ramp.jpg', 'img/maps/nuke_a.jpg'],
@@ -1944,10 +1490,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const c = XSCN[k][v];
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.s0}"/><stop offset="1" stop-color="${c.s1}"/></linearGradient><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.f0}"/><stop offset="1" stop-color="${c.f1}"/></linearGradient><linearGradient id="c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".38"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/></linearGradient><pattern id="p" width="20" height="10" patternUnits="userSpaceOnUse"><path d="${c.pd}" fill="none" stroke="#000" stroke-opacity=".16"/></pattern></defs><rect width="300" height="300" fill="url(#a)"/><rect x="90" y="108" width="120" height="70" fill="${c.far}"/><polygon points="0,0 96,108 96,176 0,300" fill="${c.wl}"/><polygon points="300,0 204,108 204,176 300,300" fill="${c.wr}"/><polygon points="0,300 96,176 204,176 300,300" fill="url(#b)"/><polygon points="0,0 96,108 96,176 0,300" fill="url(#p)"/><polygon points="300,0 204,108 204,176 300,300" fill="url(#p)"/>${c.ex}<rect width="300" height="300" fill="url(#c)"/></svg>`;
   }
-  /* ---- v10: REAL STEAM DATA for the map backdrops. Steam has no "map picture" endpoint, so the screenshots attached to the
-     Dust II / Nuke / Cache entries on the Steam Workshop are fetched with the Steam Web API (IPublishedFileService/QueryFiles, through
-     the bridge, which adds the Steam key) and used as the backdrop. Cached 12 h in this browser; the built-in scene is shown first and
-     stays as the fallback when Steam returns nothing. ---- */
   const XH_STEAM = { dust: { q: ['de_dust2', 'dust2'], re: /dust\s*(?:ii|2)|dust2/i }, nuke: { q: ['de_nuke', 'nuke'], re: /nuke/i }, cache: { q: ['de_cache', 'cache'], re: /cache/i } };
   const XH_IMG_OK = /^https:\/\/(?:[a-z0-9-]+\.)*(?:steamusercontent\.com|steamstatic\.com|akamaihd\.net)\/[^\s"'()<>\\]+$/i, XH_LS = 'mway_xhmaps_v10';
   const xhSteamMem = {};
@@ -1983,7 +1525,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return rec.p;
   }
   const xhViews = k => Math.max(2, (xhSteamMem[k] && xhSteamMem[k].imgs.length) || 0);
-  let xhBg = { k: 'dust', v: 0 };   // v10: Dust is option one and the default
+  let xhBg = { k: 'dust', v: 0 };
   function xhApplyBg() {
     const cv = $('#xhCv'), lbl = $('#xhBgLbl'), k = xhBg.k, v = xhBg.v;
     $$('#xhBgs button').forEach(b => { const on = k ? b.dataset.map === k : !!b.dataset.bg; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
@@ -2096,7 +1638,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       else return;
       xhApplyBg();
     });
-    xhApplyBg();   // v10: show the default (Dust) backdrop on load
+    xhApplyBg();
     let impT = 0;
     $('#xhImpGo').addEventListener('click', () => { if (!$('#xhImp').value.trim()) { const m = $('#xhImpMsg'); m.classList.add('bad'); m.textContent = 'Paste a crosshair share code first.'; return; } if (xhImport()) toast('Crosshair imported.'); });
     $('#xhImp').addEventListener('keydown', e => { if (e.key === 'Enter') $('#xhImpGo').click(); });
@@ -2152,7 +1694,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const svgUid = (() => { let n = 0; return () => 'u' + (++n); })();
   const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
-  /* ---- Display currency (v5) ----
+  /* ---- Display currency ----
      Market prices are fetched in USD and converted for display. `rate` = units of that currency per 1 USD (static, standard
      multipliers). To change one without editing code, set settings.steamCfg.fx, e.g. { "GBP": 0.74 }. Default: GBP. */
   const CUR = {
@@ -2189,10 +1731,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
   /* Official FACEIT skill-level artwork (SVG from FACEIT's own CDN). If it cannot load (CDN path changed, blocked, offline) the
      image is swapped for the inline ring above by the shared image-error handler (data-fc). */
-  /* v10: the badge is FACEIT's own artwork. The FACEIT Data API supplies the level number (games.cs2.skill_level); the Worker's
-     /faceit/icon/<n> route fetches the official file from FACEIT's CDN (it tries every known CDN path and caches the first real one).
-     The browser tries, in order: the Worker route, then FACEIT's CDN directly. Only if all of them fail does the shared image-error
-     handler (data-fc) fall back to the inline ring above. */
   const FC_CDN = [
     'https://cdn-frontend.faceit.com/web/960/src/app/assets/images-compress/skill-icons/skill_level_{n}_svg.svg',
     'https://cdn-frontend.faceit.com/web/965/src/static/media/skill-level-{n}.svg'
@@ -2414,7 +1952,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return Object.keys(rm).sort((a, b) => (cnt[b] || 0) - (cnt[a] || 0) || rm[b] - rm[a]).slice(0, 5).map(n => ({ map: n, rank: rm[n], played: cnt[n] || 0 }));
   }
 
-  /* ---- v6: per-map win rates from Leetify recent_matches ---- */
   function mapRecords(lf) {
     const r = {};
     ((lf && lf.recent_matches) || []).forEach(m => {
@@ -2431,10 +1968,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return `<div class="lk-wr ${cls}" title="${pct}% win rate over ${n} recent game${n > 1 ? 's' : ''}"><b>${pct}% Win Rate</b>${rec.w}W - ${rec.l}L${rec.t ? ' - ' + rec.t + 'T' : ''}</div>`;
   }
 
-  /* ---- v7: platform icons. Steam and Faceit use the official Simple Icons marks (inline SVG, single colour, same style).
-     Leetify and CSStats are not in that set, so their own site icons are loaded (Google's favicon service returns each
-     site's real icon); if the image cannot load, the local fallback marks below are shown instead. Drop the official SVG
-     files from each brand's press kit into LK_ICO / LK_ICO_FB if you want fully offline, pixel-exact artwork. ---- */
   const LK_ICO = {
     steam: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.21l-1.473-.61c.262.543.714.999 1.314 1.25 1.297.539 2.793-.076 3.332-1.375.263-.63.264-1.319.005-1.949s-.75-1.121-1.377-1.383c-.624-.26-1.29-.249-1.878-.03l1.523.63c.956.4 1.409 1.5 1.009 2.455-.397.957-1.497 1.41-2.454 1.012H7.54zm11.415-9.303c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.273-.005c0-1.252 1.013-2.266 2.265-2.266 1.249 0 2.266 1.014 2.266 2.266 0 1.251-1.017 2.265-2.266 2.265-1.253 0-2.265-1.014-2.265-2.265z"/></svg>',
     faceit: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M23.999 2.705a.167.167 0 00-.312-.1 1141.27 1141.27 0 00-6.053 9.375H.218c-.221 0-.301.282-.11.352 7.227 2.73 17.667 6.836 23.5 9.134.15.06.39-.08.39-.18z"/></svg>',
@@ -2447,7 +1980,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   };
   const lkIcon = (k, href, label) => `<a class="lk-ico ${k}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(label)}" aria-label="${esc(label)}">${LK_ICO[k]}</a>`;
 
-  /* ---- v9: crosshair box, K/D + aim gauges, last-5 form, banned friends (CS2 player lookup) ---- */
   const XH_RE = /CSGO(?:-[A-Za-z0-9]{5}){5}/, XH_ABC = 'ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789';
   function xhFind(o, depth) {   // look for a CS2 crosshair share code anywhere inside a (Leetify) object
     depth = depth || 0;
@@ -2475,7 +2007,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const r = (X, Y, W, H) => `<rect x="${X.toFixed(1)}" y="${Y.toFixed(1)}" width="${W.toFixed(1)}" height="${H.toFixed(1)}"/>`;
     return `<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g fill="rgb(${x.rgb.join(',')})" opacity="${x.a.toFixed(2)}" stroke="${x.outline ? '#000' : 'none'}" stroke-width="${x.outline ? 0.8 : 0}">${r(20 - G - L, 20 - h, L, T)}${r(20 + G, 20 - h, L, T)}${r(20 - h, 20 - G - L, T, L)}${r(20 - h, 20 + G, T, L)}${x.dot ? r(20 - h, 20 - h, T, T) : ''}</g></svg>`;
   }
-  /* v10: tolerant readers for Leetify match objects (field names differ between endpoints / versions) */
   const mPlayers = m => { const a = m && (Array.isArray(m.stats) ? m.stats : Array.isArray(m.players) ? m.players : Array.isArray(m.lobby) ? m.lobby : null); return a ? a.filter(x => x && typeof x === 'object') : []; };
   const pidOf = x => String((x && (x.steam64_id || x.steamid || x.steam_id || x.steam64 || x.player_steam64_id)) || '');
   const teamOf = x => { const t = x && (x.initial_team_number != null ? x.initial_team_number : x.team_number != null ? x.team_number : x.team != null ? x.team : null); return t == null ? null : String(t); };
@@ -2497,7 +2028,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     v._mp = (async () => {
       const lf = d.lf || {}, base = Array.isArray(lf.recent_matches) ? lf.recent_matches : [];
       let full = base.some(m => m && Array.isArray(m.stats) && m.stats.length) ? base : null;
-      if (!full) {   // /v3/profile only carries a per-match summary; the lobby (stats[] of all 10 players) comes from /v3/profile/matches
+      if (!full) {
         const k = (settings.steamCfg.leetifyKey || '').trim(), headers = k ? { Authorization: 'Bearer ' + k, _leetify_key: k } : undefined;
         try {
           const r = await proxyReq('https://api-public.cs-prod.leetify.com/v3/profile/matches?steam64_id=' + v.id, { json: true, direct: true, headers, ttl: 300000, timeout: 9000, total: 14000 });
@@ -2534,12 +2065,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     v.perf = { state: 'ok', kd: kdCalc(sorted, v.id), aim: Number.isFinite(aim) ? Math.max(0, Math.min(100, aim)) : null };
     updPerf();
   }
-  /* v10: CROSSHAIR. Neither the Steam Web API nor Leetify's public API publishes a player's crosshair share code (it only exists inside
-     the game client / demo files), which is why every lookup said "no crosshair code". Sources, in order:
-       1. the Worker's /crosshair?id= store (codes the admin saved for a player),
-       2. a code the visitor saved for their OWN profile in this browser,
-       3. any share code found in the Leetify profile / match lobby data (in case Leetify adds it).
-     When none exists the box stays clickable for the admin (any player) and for the logged-in owner (own profile) to add a code. */
   const XH_MINE = 'mway_myxh';
   const xhOwn = id => !!(session && session.steam && session.id === id);
   async function xhStart(v, d) {
@@ -2639,8 +2164,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (!hasSteamKey()) { v.fr = { state: 'nokey' }; updFr(); return; }
     let ids = [];
     try {
-      /* v10: Steam answers HTTP 401 for a PRIVATE friends list (that is not a bad key). The Worker turns it into an empty list; for
-         the public proxies / older Workers a 401/403 is accepted here as the final answer so it never shows up as an error. */
       const r = await steamApi('ISteamUser/GetFriendList/v1', { steamid: v.id, relationship: 'friend' }, { ttl: 300000, definitive: s => s === 401 || s === 403 || s === 404 });
       ids = (((r || {}).friendslist || {}).friends || []).map(f => String(f.steamid)).filter(x => /^\d{17}$/.test(x));
     } catch (e) {
@@ -2684,13 +2207,12 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     box.innerHTML = `<div class="fr-card ${f.any ? 'bad' : 'clean'}"><div class="fr-num"><b>${f.any}</b></div><div class="fr-b"><span class="fr-t">${f.any ? (f.any === 1 ? 'friend with a ban' : 'friends with bans') : 'No banned friends'}</span><span class="muted">${f.any ? `out of ${f.checked.toLocaleString('en-US')} friends checked` : `${f.checked.toLocaleString('en-US')} friends checked, none flagged`}${f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : ''}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div></div>`;
   }
 
-  /* ---- v6: Top 6 teammates (Leetify match history; falls back to recent_teammates counts) ---- */
   async function tmStart(v, d) {
     const lf = d.lf || {};
     v.tm = { state: 'loading', list: [] }; updTm();
     if (d.lfState !== 'ok') { v.tm = { state: 'none', list: [] }; updTm(); return; }
     try {
-      const matches = (await loadMatches(v, d)).full;   // v9: shared with K/D, form and crosshair
+      const matches = (await loadMatches(v, d)).full;
       if (lkv !== v) return;
       const agg = {};
       (Array.isArray(matches) ? matches : []).forEach(m => {
@@ -2706,8 +2228,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         });
       });
       let list = Object.values(agg), counts = false;
-      /* v10: Leetify's own recent_teammates list tops the result up to 6 (it used to REPLACE the match-based list only when that was
-         empty, which is how a 5-entry list ended up on screen). Players already counted from the matches are not repeated. */
       if (list.length < 6) {
         const have = new Set(list.map(t => t.id));
         (Array.isArray(lf.recent_teammates) ? lf.recent_teammates : []).forEach(t => {
@@ -2746,7 +2266,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     }).join('')}</div><p class="muted">Counted from the recent matches Leetify returns${t.counts ? ' (match details were unavailable, so win rates are not shown)' : ''}. Click a teammate to look them up.</p>`;
   }
 
-  /* ---- v6: Top 10 most typed chat messages. Steam / Leetify expose no chat history, so this analyses a log the user supplies. ---- */
   const MSG_TS = /^\s*(?:\d{1,4}[\/.-]\d{1,2}(?:[\/.-]\d{1,4})?\s*[-,]?\s*)?(?:\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\s*[-:]?\s*)?/;
   const MSG_TAG = /^(?:\[(?:all|team|ct|t|spec|dead|all\s*\(dead\))\]|\((?:terrorist|counter-terrorist|spectator)\))\s*(.+?)(?:\s*[\ufe6b@]\s*[^:]{1,40})?\s*:\s+(.+)$/i;
   function msgAnalyze(text, nameFilter) {
@@ -2821,18 +2340,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   };
   const itemImg = i => i.icon ? `https://community.cloudflare.steamstatic.com/economy/image/${i.icon}/128fx128f` : '';
 
-  /* v7 - INVENTORY (client side). Diagnostics showed steamcommunity.com/inventory/<id>/730/2 answering HTTP 429 for every
-     lookup because Steam throttles the Worker's shared Cloudflare IP. The old code blocked the tool in "Loading inventory..."
-     for several minutes (5 sequential attempts, up to 120 s each) and only fell back to the saved copy at the very end. Now:
-       - a saved copy (this browser, up to 7 days) is shown INSTANTLY and priced at once; a fresh copy is requested in the
-         background and swapped in only if it differs (invRefresh);
-       - lookups still run one at a time with a gap (invSlot), never in parallel bursts;
-       - on a 429 from the Worker the request is tried once through the public proxies (other IPs), then the tool backs off
-         6 / 12 / 20 / 30 / 45 / 60 s (or the Worker's Retry-After) with a live countdown that updates a single text node, so
-         nothing else on the page is rebuilt or blocked;
-       - opening another profile (or pressing Retry) cancels the old retry loop through a run token (alive());
-       - the Worker (worker.js v7) additionally answers saved copies instantly and refreshes them in the background. */
-  const INV_GAP_MS = 2000, INV_WAITS = [6, 12, 20, 30, 45, 60], INV_LOCAL_KEY = 'mway_invc2';   // v10: bumped, saved copies from before the float data (pr) existed are ignored
+  const INV_GAP_MS = 2000, INV_WAITS = [6, 12, 20, 30, 45, 60], INV_LOCAL_KEY = 'mway_invc2';
   const INV_LOCAL_FRESH = 5 * 60 * 1000, INV_LOCAL_KEEP = 7 * 24 * 3600 * 1000;
   let invQueue = Promise.resolve(), invNextAt = 0, invLegacyOff = 0;
   const invSlot = fn => {
@@ -2867,15 +2375,12 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     do {
       const url = `https://steamcommunity.com/inventory/${id}/730/2?l=english&count=1000` + (start ? '&start_assetid=' + start : '');
       let r;
-      try { r = await invReq(url, defin, alive); } catch (e) { if (pages && e.code === 'RATE') break; throw e; }   // v7: keep the pages already loaded
+      try { r = await invReq(url, defin, alive); } catch (e) { if (pages && e.code === 'RATE') break; throw e; }
       if (r.stale) staleAt = r.stale;   // the Worker served a saved copy
       if (r.status !== 200 || !r.json) { if (!pages) return null; break; }
       const j = r.json;
       if (j.success === false || j.success === 0) { if (!pages) return null; break; }
       (j.assets || []).forEach(a => assets.push(a));
-      /* v10: Steam ships the float of every CS2 item itself in asset_properties (propertyid 1 = pattern template, 2 = wear rating /
-         float, 6 = the self-contained inspect payload). The inspect link of those items is "...csgo_econ_action_preview%20%propid:6%",
-         which the old code rejected (placeholder still inside) and therefore showed "n/a". */
       (j.asset_properties || []).forEach(e => {
         if (!e || e.assetid == null) return;
         const o = {};
@@ -2903,10 +2408,10 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         g.set(nm, it);
       }
       it.qty += Number(a.amount) || 1; it.ids.push(a.assetid);
-      { const p = props[String(a.assetid)]; it.pr.push(p && (p.f != null || p.s != null || p.c) ? (p.f != null ? { f: p.f, s: p.s } : { s: p.s, c: p.c }) : null); }   // v10: the cert is only kept when no float came with it (keeps the saved copy small)
+      { const p = props[String(a.assetid)]; it.pr.push(p && (p.f != null || p.s != null || p.c) ? (p.f != null ? { f: p.f, s: p.s } : { s: p.s, c: p.c }) : null); }
       it.links.push((x.actions && x.actions[0] && x.actions[0].link) || it.link || '');   // each asset keeps the link of ITS description (the D code differs between stickered / patterned copies)
     });
-    const out = [...g.values()]; if (staleAt) out.staleAt = staleAt;   // v4: the Worker served a saved copy because Steam was limiting
+    const out = [...g.values()]; if (staleAt) out.staleAt = staleAt;
     return out;
   }
 
@@ -2930,9 +2435,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return { p: v > 0 ? v : 0, s: 'steam' };
   }
   /* ---- CSFloat ---- */
-  let csfPub = null, csfPushedAt = 0;      // v5: csfPub = result of the Worker's shared price snapshot (visitors need no key)
+  let csfPub = null, csfPushedAt = 0;
   const floatKey = () => (settings.steamCfg.floatKey || '').trim();
-  /* v5: true when this browser has a key, OR the Worker holds a key, OR the Worker has a shared CSFloat price snapshot. */
   const hasFloat = () => !!floatKey() || !!(bridgeCaps && bridgeCaps.url === bridgeUrl() && (bridgeCaps.csfloatKey || bridgeCaps.csfloatPrices)) || !!(csfPub && csfPub.ok);
   /* Stored key goes out as the Authorization header (direct first, then through the bridge, which forwards it).
      With no key stored in this browser the request skips the direct route and the Worker adds its CSFLOAT_API_KEY secret. */
@@ -3022,8 +2526,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const steamStage = async () => {
       let todo = names.filter(n => !(v.price[n] && v.price[n].steam > 0));
       if (!todo.length) return;
-      /* v6: ALWAYS try the one-request community price list first, even for 1-2 items. Before, inventories with 3 or fewer
-         marketable types skipped it and went straight to Steam's per-item endpoint, which is what answered HTTP 429. */
       v.inv.msg = 'Loading Steam Market price list...'; updInv();
       const b = await Promise.race([pxBulk(), sleep(10000).then(() => null)]);
       if (lkv !== v) return;
@@ -3092,7 +2594,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const saved = invLocalGet(v.id);
     v.inv = { state: 'loading', items: [], msg: '', wait: '', pricing: false, partial: false };
     if (!saved) { updInv(); return invRefresh(v, false, alive); }
-    /* v7: show the saved copy immediately, price it, and ask Steam for a fresh one in the background. */
     const young = Date.now() - saved.t < INV_LOCAL_FRESH;
     v.inv.items = saved.items; v.inv.state = 'ok'; v.inv.pricing = true;
     v.inv.staleNote = young ? '' : 'Showing a saved copy from ' + fmtTime(new Date(saved.t).toISOString()) + ' while a fresh one is requested from Steam.';
@@ -3147,7 +2648,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     }
   }
 
-  /* ---- Steam profile comments (v6: own request path, paginated 10 at a time, retries on its own, never waits for the inventory) ---- */
+  /* ---- Steam profile comments (own request path, paginated 10 at a time, retries on its own, never waits for the inventory) ---- */
   const COM_PAGE = 10;
   function comParse(html) {
     const doc = new DOMParser().parseFromString(html || '', 'text/html');
@@ -3299,7 +2800,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       }
     }
   }
-  /* ---- Float lookup (v5) ---------------------------------------------------------------------------------------------
+  /* ---- Float lookup ---------------------------------------------------------------------------------------------
      1. Since March 2026 CS2 inspect links can carry the item data themselves (a hex protobuf): those are decoded right here,
         no service involved. The checksum is verified; if it does not match, the remote services are tried first.
      2. Old-style links (S..A..D..) need Steam's game coordinator, so they go to the Worker's /inspect route (provider chain,
@@ -3316,7 +2817,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const INSPECT_PREFIX = 'steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20';
   function inspectLink(raw, steamId, assetId, pr) {
     let s = String(raw || '').trim(); if (!s) return '';
-    s = s.replace(/(?:%25|%)propid(?::|%3A)(\d+)(?:%25|%)/gi, (all, n) => (+n === 6 && pr && pr.c) ? pr.c : all);   // v10: new-style links carry the payload as property 6
+    s = s.replace(/(?:%25|%)propid(?::|%3A)(\d+)(?:%25|%)/gi, (all, n) => (+n === 6 && pr && pr.c) ? pr.c : all);
     const owner = String(steamId || '').replace(/\D/g, ''), asset = String(assetId || '').replace(/\D/g, '');
     s = s.replace(/(?:%5B|\[|%)\s*(?:owner_steamid|owner_id|ownerid|owner)\s*(?:%5D|\]|%)/gi, owner)
          .replace(/(?:%5B|\[|%)\s*(?:asset_id|assetid)\s*(?:%5D|\]|%)/gi, asset);
@@ -3423,7 +2924,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       el.textContent = 'loading\u2026'; set('#imWear', '\u2026'); set('#imSeed', '\u2026'); const ex0 = $('#imExtra'); if (ex0) ex0.textContent = '';
       try {
         let x;
-        if (q && Number.isFinite(q.f)) x = { floatvalue: q.f, paintseed: q.s != null ? q.s : null, wear_name: wearOf(q.f), stickerNames: [], stickerCount: 0, via: 'Steam inventory data' };   // v10: no external service needed
+        if (q && Number.isFinite(q.f)) x = { floatvalue: q.f, paintseed: q.s != null ? q.s : null, wear_name: wearOf(q.f), stickerNames: [], stickerCount: 0, via: 'Steam inventory data' };
         else if (link) x = await inspFloat(link);
         else throw Object.assign(netErr('INSPECT', 'Steam sent no float data for this copy'), { nodata: true });
         const el2 = $('#imFloat'); if (!el2) return;
@@ -3497,8 +2998,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       rk.faceit || fcNick ? lkIcon('faceit', faceitUrl, 'Faceit Profile') : '',
       lkIcon('leetify', 'https://leetify.com/app/profile/' + d.id, 'Leetify Profile'),
       lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div></div>`;
-    /* v7: the Faceit and Premier boxes (plus the Trust Factor beside them) are ALWAYS rendered, so the layout never collapses
-       when a player has no rank, no Faceit account or no Leetify data: the empty boxes say "Unranked" instead. */
     const hc = d.hltv >= 1.1 ? '#4fb286' : d.hltv >= 1 ? '#5b8def' : d.hltv >= 0.9 ? '#d1a455' : '#d1556a';
     const cs2 = `<div class="lk-toprow">
         <div class="lk-tile lk-tile-fc"><span class="flabel">FACEIT level</span>${faceitTile(d, rk)}</div>
@@ -3542,8 +3041,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     updTabs();
     if (d.pub === false) {
       v.inv = { state: 'private', items: [] }; v.com = { state: 'closed', list: [] }; updInv(); updTabs();
-    } else { invStart(v); comStart(v); }     // v6: inventory, comments and teammates are separate async jobs: none waits for another
-    tmStart(v, d); statsStart(v, d); xhStart(v, d); frStart(v, d);   // v9 / v10 (crosshair has its own job)
+    } else { invStart(v); comStart(v); }
+    tmStart(v, d); statsStart(v, d); xhStart(v, d); frStart(v, d);
   }
 
   async function lkSearch(force) {
@@ -3598,7 +3097,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     } finally { if (tok === lkTok) btn.disabled = false; }
   }
 
-  /* v6: Top Messages tool (local analysis) */
   function msgRun(v) {
     const a = $('#msgIn'), nm = (($('#msgName') || {}).value || '').trim().toLowerCase(), txt = v.msgFull || (a ? a.value : v.msgText) || '';
     v.msgText = a ? a.value : v.msgText; v.msg = msgAnalyze(txt, nm); msgRender(v);
@@ -3618,8 +3116,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     out.addEventListener('click', async e => {
       const t = e.target, cp = t.closest('[data-cp]');
       if (cp) return toast(await copyText(cp.dataset.cp) ? 'Copied.' : 'Copy failed.');
-      const xhs = t.closest('[data-xhset]'); if (xhs) return xhSetModal(lkv);   // v10
-      const xhb = t.closest('[data-xh]'); if (xhb) return toast(await copyText(xhb.dataset.xh) ? 'Crosshair code copied. In CS2: Settings > Game > Crosshair > Import.' : 'Copy failed.');   // v9
+      const xhs = t.closest('[data-xhset]'); if (xhs) return xhSetModal(lkv);
+      const xhb = t.closest('[data-xh]'); if (xhb) return toast(await copyText(xhb.dataset.xh) ? 'Crosshair code copied. In CS2: Settings > Game > Crosshair > Import.' : 'Copy failed.');
       if (t.closest('[data-cp-all]') && lkv) return toast(await copyText((lkv.ids || []).map(([l, x]) => l + ': ' + x).join('\n')) ? 'All IDs copied.' : 'Copy failed.');
       if (t.closest('[data-com-more]') && lkv) return comMore(lkv);
       if (t.closest('[data-com-retry]') && lkv) return comStart(lkv);
@@ -3635,7 +3133,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const lr = t.closest('[data-lk-retry]'); if (lr) { delete lkCache[lr.dataset.lkRetry]; $('#lkIn').value = lr.dataset.lkRetry; return lkSearch(true); }
       const it = t.closest('[data-ai]'); if (it) itemModal(it.dataset.ai);
     });
-    out.addEventListener('error', e => {   // v7: Leetify / CSStats icon image could not load -> local fallback mark
+    out.addEventListener('error', e => {
       const img = e.target;
       if (img && img.tagName === 'IMG' && img.dataset.lkfb && LK_ICO_FB[img.dataset.lkfb]) { const w = document.createElement('span'); w.innerHTML = LK_ICO_FB[img.dataset.lkfb]; img.replaceWith(w.firstChild); }
     }, true);
@@ -3646,7 +3144,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     out.addEventListener('change', e => { if (e.target.id === 'msgFile' && lkv) msgFile(e.target.files && e.target.files[0], lkv); });
     out.addEventListener('change', e => {
       if (e.target.id === 'invSort' && lkv) { lkv.sort = e.target.value; updGrid(); }
-      else if (e.target.id === 'invCur') { setCur(e.target.value); e.target.blur(); updInv(); updGrid(); }   // v5: instant currency switch
+      else if (e.target.id === 'invCur') { setCur(e.target.value); e.target.blur(); updInv(); updGrid(); }
     });
     out.addEventListener('focusout', e => { if (e.target && e.target.id === 'invCur' && lkv) { updInv(); updGrid(); } });
     const imgFail = e => {
@@ -3655,7 +3153,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       else if (img.dataset.yfb) { const w = document.createElement('span'); w.innerHTML = yearSVG(+img.dataset.yfb, +img.dataset.px || 46); img.replaceWith(w.firstChild); }
       else if (img.dataset.rk) { const w = document.createElement('span'); w.className = 'rk-txt'; w.textContent = COMP[+img.dataset.rk] || 'Rank'; img.replaceWith(w); }
       else if (img.dataset.gfb) { const w = document.createElement('span'); w.innerHTML = gcSVG(+img.dataset.gfb, +img.dataset.px || 46); img.replaceWith(w.firstChild); }
-      else if (img.dataset.fc) {   // v10: next official source first, the inline ring only when every source failed
+      else if (img.dataset.fc) {
         const srcs = fcSrcs(+img.dataset.fc), i = (+img.dataset.fci || 0) + 1;
         if (i < srcs.length) { img.dataset.fci = String(i); img.src = srcs[i]; }
         else { const w = document.createElement('span'); w.innerHTML = faceitIcon(+img.dataset.fc, +img.dataset.px || 60); img.replaceWith(w.firstChild); }
@@ -3933,15 +3431,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     diagBadge(); diagDraw(); diagDrawChecks();
   }
 
-
-  /* =====================================================================
-     v4 FIX 3: API KEYS TAKE EFFECT IMMEDIATELY
-     Keys typed in Admin used to stay in this browser (only a Worker secret reached other visitors). Now every Steam / CSFloat /
-     Leetify / Faceit key is also sent to the Worker (PUT /admin/keys, stored in KV, never returned, never published in the
-     global state). The Worker uses it on the very next request and answers with a working / failing verdict that is shown
-     here. Nothing to redeploy, no hard reset. A fresh browser can never wipe server keys: empty fields are only sent when you
-     clear a field that had a value.
-     ===================================================================== */
   const KP = { timer: 0, busy: false, again: false, cleared: new Set() };
   const KEY_LABEL = { steam: 'Steam', csfloat: 'CSFloat', leetify: 'Leetify', faceit: 'Faceit' };
   function keysAfterRead(before) {
@@ -3990,12 +3479,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     } finally { KP.busy = false; if (KP.again) { KP.again = false; setTimeout(() => keysPush(false), 300); } }
   }
 
-  /* =====================================================================
-     v4 FIX 5: SERVER-SIDE ERROR & API LOG (Admin)
-     Reads the log kept by the Worker (GET /admin/log): API key verdicts (working / failing), Steam OpenID timeouts and
-     rejections, blocked origins, inventory 429 cooldowns, upstream errors and unhandled Worker errors. "Download" saves the
-     Worker's own plain-text report; no secret is ever included.
-     ===================================================================== */
   const SL = { entries: [], keys: null, info: null, at: 0, busy: false };
   async function slReq(path, init) {
     const b = bridgeUrl(), tok = gsToken();
@@ -4062,7 +3545,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
 
   /* =====================================================================
-     12g. GLOBAL SYNC: settings, tools and bots are shared through the Worker (GET/PUT /state, backed by KV)
+     12g. GLOBAL SYNC: settings are shared through the Worker (GET/PUT /state, backed by KV)
      Visitors load the published copy on every page view (and re-check while the page stays open). The Admin's saves are
      PUT to the Worker with the ADMIN_TOKEN. Secrets (Steam / CSFloat / Leetify / Faceit / HLTV keys, proxy, bridge URL)
      are never published: they stay in the Admin's own browser (and as Worker secrets).
@@ -4089,7 +3572,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     st.steamCfg = { accounts: c.accounts, last: c.last, cache: c.cache || {}, hltvUrl, bridgeOnly: c.bridgeOnly !== false };
     return st;
   }
-  const gsPayload = () => ({ mway_settings: gsPublicSettings(), mway_tools: tools, mway_bots: bots });
+  const gsPayload = () => ({ mway_settings: gsPublicSettings() });
 
   /* Admin side: debounce, then PUT. */
   function gsQueue() {
@@ -4098,9 +3581,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     clearTimeout(GS.timer);
     if (!bridgeUrl()) return gsStatus('Saved in this browser only. Set the Worker bridge URL to publish changes to visitors.', true);
     if (!gsToken()) return gsStatus('Saved in this browser only. Enter the Worker ADMIN_TOKEN (Admin > Global Sync) to publish changes to visitors.', true);
-    GS.timer = setTimeout(() => { gsPush(false); }, 600);   // v4: was 1500 ms
+    GS.timer = setTimeout(() => { gsPush(false); }, 600);
   }
-  async function gsPush(manual, force) {   // v4: force=true bumps the revision on the server even if nothing changed
+  async function gsPush(manual, force) {
     const b = bridgeUrl(), tok = gsToken();
     if (!isAdmin() || !b || !tok) { if (manual) gsStatus(gsIdleMsg(), true); return false; }
     if (GS.pulling) { try { await GS.pulling; } catch { /* handled in gsPull */ } }
@@ -4141,8 +3624,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       if (!ns.steamCfg.hltvUrl) ns.steamCfg.hltvUrl = keep.hltvUrl || '';
       settings = ns; lsPut('mway_settings', settings);
     }
-    if (Array.isArray(j.mway_tools)) { tools = j.mway_tools.map(normTool); lsPut('mway_tools', tools); }
-    if (Array.isArray(j.mway_bots)) { bots = j.mway_bots.map(normTool); lsPut('mway_bots', bots); }
     GS.rev = j.rev || 0; try { localStorage.setItem(GS_REV_KEY, String(GS.rev)); } catch { /* ignore */ }
     applyAuth();
   }
@@ -4162,7 +3643,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         GS.synced = true;
         diag('ok', 'state', 'global state loaded (rev ' + j.rev + (j.unchanged ? ', unchanged' : '') + ')', performance.now() - t0, 'ok|state');
         if (j.unchanged) return true;
-        if (!(j.mway_settings || j.mway_tools || j.mway_bots)) { if (isAdmin()) gsStatus('Nothing is published yet. Save any change, or press "Publish now", to share your current setup with visitors.'); return true; }
+        if (!j.mway_settings) { if (isAdmin()) gsStatus('Nothing is published yet. Save any change, or press "Publish now", to share your current setup with visitors.'); return true; }
         if (isAdmin() && gsDirty() && !o.force) { gsStatus('This browser has local changes that are not published. The server copy was NOT applied. Press "Publish now" to overwrite it, or "Reload from server" to discard your local changes.', true); return true; }
         gsApply(j); gsSetDirty(false);
         if (isAdmin()) gsStatus('Loaded the published version (revision ' + j.rev + ').');
@@ -4176,9 +3657,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     })();
     return GS.pulling;
   }
-  /* v4 FIX 2: "Refresh Server / Force Update". Pushes the current configuration, bumps the revision on the server even when
-     nothing changed (every open page re-downloads and re-applies tabs / tools / bots on its next check), then reads the
-     server copy back so you can see what visitors will actually receive. */
   async function gsForce() {
     if (!isAdmin()) return;
     const b = bridgeUrl(), tok = gsToken();
@@ -4204,23 +3682,172 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       if (!isAdmin()) return;
       if (!bridgeUrl() || !v) return gsStatus(gsIdleMsg(), true);
       const ok = await gsPush(true);
-      if (ok) { toast('Published to all visitors.'); keysPush(false); }   // v4: token just saved -> also upload the API keys
+      if (ok) { toast('Published to all visitors.'); keysPush(false); }
     });
     $('#gsPull').addEventListener('click', () => {
       if (!bridgeUrl()) return gsStatus(gsIdleMsg(), true);
-      openModal(`<h3>Reload from server</h3><p>Replace this browser's settings, tools and bots with the published version? Unpublished local changes are lost.</p>
+      openModal(`<h3>Reload from server</h3><p>Replace this browser's settings with the published version? Unpublished local changes are lost.</p>
         <div class="row"><button class="btn btn-small" id="gpNo">Cancel</button><button class="btn btn-primary btn-small" id="gpYes">Reload</button></div>`);
       $('#gpNo').onclick = closeModal;
       $('#gpYes').onclick = async () => { closeModal(); gsStatus('Loading the published version...'); const ok = await gsPull({ force: true }); if (ok) toast('Reloaded from the server.'); };
     });
     // Visitors: pick up newly published changes without a manual refresh.
-    // v4 FIX 2: visitors used to re-check at most every 90-120 s. The check is a tiny "?rev=N -> unchanged" request, so it now
     // runs about every 10 s while the tab is visible, and immediately when the tab regains focus.
     const poll = () => { if (!document.hidden && !isAdmin() && bridgeUrl() && Date.now() - GS.polled > 9000) gsPull(); };
     setInterval(poll, 5000);
     document.addEventListener('visibilitychange', poll);
     window.addEventListener('focus', poll);
     $('#gsForce').addEventListener('click', gsForce);
+  }
+
+  /* =====================================================================
+     12h. CS2 UTILITIES (beta): lineup map. Everyone can browse maps and markers; only Steam-logged-in users can add markers.
+     Markers are shared through the Worker (GET/POST /markers). Without a reachable Worker they stay in this browser only.
+     Radar images are optional: drop maps/<id>.png next to index.html (mirage, inferno, dust2, nuke, overpass, ancient, anubis, vertigo, train).
+     ===================================================================== */
+  const UT_MAPS = [['mirage', 'Mirage'], ['inferno', 'Inferno'], ['dust2', 'Dust II'], ['nuke', 'Nuke'], ['overpass', 'Overpass'], ['ancient', 'Ancient'], ['anubis', 'Anubis'], ['vertigo', 'Vertigo'], ['train', 'Train']];
+  const UT_TYPES = { smoke: ['Smoke', '#9db4d6'], flash: ['Flash', '#f2d65b'], molly: ['Molotov', '#ff7a45'], he: ['HE', '#7ddf8a'], other: ['Other', '#c58bff'] };
+  const UT_HOST = /^(cdn\.discordapp\.com|media\.discordapp\.net|(www\.)?discord(app)?\.com|discord\.gg)$/i;
+  const UT_LOCAL = 'mway_markers';
+  const UT = { map: 'mirage', type: 'all', data: load(UT_LOCAL, {}), sel: '', draft: null, place: false, remote: false, ready: false, loading: false, msg: '' };
+  const utCan = () => !!(session && session.steam);
+  const utList = () => (UT.data[UT.map] || []).filter(m => UT.type === 'all' || m.type === UT.type);
+  const utName = id => (UT_MAPS.find(m => m[0] === id) || [id, id])[1];
+  function utUrl(raw) {
+    try { const u = new URL(String(raw || '').trim()); return u.protocol === 'https:' && UT_HOST.test(u.hostname) ? u.href : ''; } catch { return ''; }
+  }
+  const utIsVideo = u => { try { const p = new URL(u); return /^(cdn\.discordapp\.com|media\.discordapp\.net)$/i.test(p.hostname) && /\.(mp4|webm|mov)$/i.test(p.pathname); } catch { return false; } };
+  function utSay(msg, bad) { UT.msg = msg || ''; const el = $('#utMsg'); if (el) { el.textContent = UT.msg; el.style.color = bad ? 'var(--danger)' : ''; } }
+  async function utApi(body, admin) {
+    const b = bridgeUrl(); if (!b) throw new Error('no bridge');
+    const h = { 'Content-Type': 'application/json' };
+    if (admin) h['X-Mway-Token'] = gsToken(); else if (session && session.tok) h.Authorization = 'Bearer ' + session.tok;
+    const res = await fetchText(b + '/markers', { method: 'POST', headers: h, body: JSON.stringify(body) }, 12000);
+    let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+    if (res.status === 200 && j && j.ok) return j;
+    const e = new Error((j && j.error) || 'HTTP ' + res.status); e.status = res.status; throw e;
+  }
+  async function utLoad() {
+    if (UT.loading) return; UT.loading = true;
+    try {
+      const b = bridgeUrl(); if (!b) throw new Error('no bridge');
+      const res = await fetchText(b + '/markers', {}, 10000);
+      const j = JSON.parse(res.text);
+      if (res.status !== 200 || !j || !j.ok || typeof j.markers !== 'object') throw new Error('unavailable');
+      UT.data = j.markers; UT.remote = true; lsPut(UT_LOCAL, UT.data);
+      utSay('');
+    } catch { UT.remote = false; utSay('Shared markers are offline. Showing and saving markers on this device only.'); }
+    finally { UT.loading = false; UT.ready = true; utDraw(); }
+  }
+  function utEnter() {
+    utDraw();
+    if (!UT.ready) utLoad(); else if (Date.now() - (UT.at || 0) > 20000) { UT.at = Date.now(); utLoad(); }
+    UT.at = UT.at || Date.now();
+  }
+  function utRefresh() { if ($('#utPanel') && tab3Sub === 'utilities' && $('#tab3').classList.contains('active')) utDraw(); else utToolbar(); }
+  function utToolbar() {
+    const can = utCan(), pl = $('#utPlace');
+    pl.disabled = !can; pl.classList.toggle('on', UT.place && can); pl.setAttribute('aria-pressed', String(UT.place && can));
+    pl.textContent = UT.place && can ? 'Click the map...' : '+ Add marker';
+    pl.title = can ? 'Click, then click a spot on the map' : 'Log in with Steam to add markers';
+    $('#utIntro').textContent = can ? 'Pick a map, press Add marker, click a spot and attach a Discord video link of the lineup.'
+      : 'Browse lineup markers for every map. Log in with Steam to add your own: markers need a Discord-linked video.';
+    $('#utBoard').classList.toggle('placing', UT.place && can);
+  }
+  function utDraw() {
+    $('#utMaps').innerHTML = UT_MAPS.map(([id, n]) => `<button type="button" class="ut-map${id === UT.map ? ' on' : ''}" role="tab" aria-selected="${id === UT.map}" data-map="${id}">${esc(n)}<i>${(UT.data[id] || []).length || ''}</i></button>`).join('');
+    $('#utTypes').innerHTML = [['all', 'All', '#8fb2ff']].concat(Object.entries(UT_TYPES).map(([k, v]) => [k, v[0], v[1]]))
+      .map(([k, n, c]) => `<button type="button" class="ut-chip${UT.type === k ? ' on' : ''}" data-type="${k}" style="--c:${c}" aria-pressed="${UT.type === k}">${esc(n)}</button>`).join('');
+    const img = $('#utImg'), src = 'maps/' + UT.map + '.png';
+    if (img.dataset.map !== UT.map) {
+      img.dataset.map = UT.map; img.classList.add('hidden'); $('#utFallback').classList.remove('hidden');
+      img.onload = () => { img.classList.remove('hidden'); $('#utFallback').classList.add('hidden'); };
+      img.onerror = () => { img.classList.add('hidden'); $('#utFallback').classList.remove('hidden'); };
+      img.src = src;
+    }
+    $('#utFbName').textContent = utName(UT.map).toUpperCase();
+    $('#utFbHint').textContent = 'Add a radar image at ' + src + ' for the full overview';
+    const list = utList();
+    $('#utPins').innerHTML = list.map((m, i) => `<button type="button" class="ut-pin${m.id === UT.sel ? ' sel' : ''}" data-id="${esc(m.id)}" style="left:${(m.x * 100).toFixed(2)}%;top:${(m.y * 100).toFixed(2)}%;--c:${(UT_TYPES[m.type] || UT_TYPES.other)[1]}" aria-label="${esc(m.title)}"><span>${i + 1}</span></button>`).join('')
+      + (UT.draft ? `<span class="ut-pin draft" style="left:${(UT.draft.x * 100).toFixed(2)}%;top:${(UT.draft.y * 100).toFixed(2)}%;--c:#fff"><span>+</span></span>` : '');
+    $('#utCount').textContent = list.length + ' marker' + (list.length === 1 ? '' : 's') + ' on ' + utName(UT.map);
+    utToolbar(); utSide();
+  }
+  function utSide() {
+    const el = $('#utSide'), m = (UT.data[UT.map] || []).find(x => x.id === UT.sel);
+    if (UT.draft && utCan()) {
+      el.innerHTML = `<h3>New marker</h3><span class="flabel">Title</span><input id="utTitle" maxlength="40" placeholder="e.g. A site smoke from T spawn" autocomplete="off">
+        <span class="flabel mt-s">Type</span><select id="utType">${Object.entries(UT_TYPES).map(([k, v]) => `<option value="${k}">${esc(v[0])}</option>`).join('')}</select>
+        <span class="flabel mt-s">Discord video link</span><input id="utUrl" placeholder="https://cdn.discordapp.com/attachments/..." autocomplete="off" spellcheck="false">
+        <span class="flabel mt-s">Note (optional)</span><textarea id="utNote" rows="2" maxlength="140" placeholder="Where to stand, which jump or click"></textarea>
+        <div class="row"><button id="utSave" type="button" class="btn btn-primary btn-small">Save marker</button><button id="utCancel" type="button" class="btn btn-small">Cancel</button></div>
+        <p class="muted">Links must come from Discord (cdn.discordapp.com, media.discordapp.net, discord.com or discord.gg).</p>`;
+      return;
+    }
+    if (m) {
+      const t = UT_TYPES[m.type] || UT_TYPES.other, v = utUrl(m.url), mine = utCan() && session.id === m.by, del = mine || isAdmin();
+      el.innerHTML = `<button id="utBack" type="button" class="btn btn-small">&larr; All markers</button>
+        <h3>${esc(m.title)}</h3><div class="ut-meta"><span class="ut-tag" style="--c:${t[1]}">${esc(t[0])}</span><span class="muted">by ${esc(m.name || m.by)} &middot; ${esc(new Date(m.ts).toISOString().slice(0, 10))}</span></div>
+        ${m.note ? `<p>${esc(m.note)}</p>` : ''}
+        ${v && utIsVideo(v) ? `<video class="ut-video" controls preload="metadata" src="${esc(v)}"></video>` : ''}
+        ${v ? `<a class="btn btn-primary btn-small" href="${esc(v)}" target="_blank" rel="noopener noreferrer">Open lineup video</a>` : '<p class="muted">No valid video link.</p>'}
+        ${del ? '<button id="utDel" type="button" class="btn btn-small btn-danger">Delete marker</button>' : ''}`;
+      return;
+    }
+    const list = utList();
+    el.innerHTML = `<h3>${esc(utName(UT.map))} lineups</h3>` + (list.length ? `<ul class="ut-list">${list.map((x, i) => `<li><button type="button" data-id="${esc(x.id)}"><b style="--c:${(UT_TYPES[x.type] || UT_TYPES.other)[1]}">${i + 1}</b><span>${esc(x.title)}</span></button></li>`).join('')}</ul>`
+      : '<p class="muted">No markers here yet.' + (utCan() ? ' Press Add marker to create the first one.' : ' Log in with Steam to add one.') + '</p>');
+  }
+  function utStore(map, list) { UT.data[map] = list; lsPut(UT_LOCAL, UT.data); }
+  async function utSave() {
+    if (!utCan() || !UT.draft) return;
+    const title = $('#utTitle').value.trim(), url = utUrl($('#utUrl').value);
+    if (!title) return toast('Give the marker a title.');
+    if (!url) return toast('Use an https Discord video link (cdn.discordapp.com, media.discordapp.net, discord.com or discord.gg).');
+    const m = { map: UT.map, x: +UT.draft.x.toFixed(4), y: +UT.draft.y.toFixed(4), type: $('#utType').value, title, url, note: $('#utNote').value.trim(), name: String(session.name || session.id).slice(0, 32) };
+    const btn = $('#utSave'); btn.disabled = true;
+    try {
+      if (UT.remote) {
+        const j = await utApi({ op: 'add', marker: m }); utStore(UT.map, (UT.data[UT.map] || []).concat(j.marker)); UT.sel = j.marker.id;
+        toast('Marker saved for everyone.');
+      } else {
+        const loc = Object.assign({ id: 'l' + Date.now().toString(36), by: session.id, ts: Date.now() }, m); utStore(UT.map, (UT.data[UT.map] || []).concat(loc)); UT.sel = loc.id;
+        toast('Marker saved on this device only.');
+      }
+      UT.draft = null; UT.place = false;
+    } catch (e) {
+      toast(e.status === 401 ? 'Your Steam session has no write permission. Log out and log in with Steam again.' : 'Could not save: ' + e.message);
+    }
+    utDraw();
+  }
+  async function utDelete() {
+    const list = UT.data[UT.map] || [], m = list.find(x => x.id === UT.sel); if (!m) return;
+    try {
+      if (UT.remote && m.id[0] !== 'l') await utApi({ op: 'del', id: m.id }, !(utCan() && session.id === m.by));
+      utStore(UT.map, list.filter(x => x.id !== m.id)); UT.sel = ''; toast('Marker deleted.');
+    } catch (e) { toast('Could not delete: ' + e.message); }
+    utDraw();
+  }
+  function utInit() {
+    $('#utMaps').addEventListener('click', e => { const b = e.target.closest('[data-map]'); if (!b) return; UT.map = b.dataset.map; UT.sel = ''; UT.draft = null; utDraw(); });
+    $('#utTypes').addEventListener('click', e => { const b = e.target.closest('[data-type]'); if (!b) return; UT.type = b.dataset.type; UT.sel = ''; utDraw(); });
+    $('#utPlace').addEventListener('click', () => { if (!utCan()) return toast('Log in with Steam to add markers.'); UT.place = !UT.place; UT.draft = null; UT.sel = ''; utDraw(); });
+    $('#utBoard').addEventListener('click', e => {
+      const pin = e.target.closest('.ut-pin[data-id]');
+      if (pin) { UT.sel = pin.dataset.id; UT.draft = null; UT.place = false; return utDraw(); }
+      if (!UT.place || !utCan()) return;
+      const r = $('#utBoard').getBoundingClientRect();
+      UT.draft = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; UT.sel = '';
+      utDraw(); const t = $('#utTitle'); if (t) t.focus();
+    });
+    $('#utSide').addEventListener('click', e => {
+      const t = e.target;
+      if (t.closest('#utSave')) return utSave();
+      if (t.closest('#utCancel')) { UT.draft = null; UT.place = false; return utDraw(); }
+      if (t.closest('#utBack')) { UT.sel = ''; return utDraw(); }
+      if (t.closest('#utDel')) return utDelete();
+      const li = t.closest('[data-id]'); if (li) { UT.sel = li.dataset.id; utDraw(); }
+    });
   }
 
     /* =====================================================================
@@ -4235,10 +3862,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   startAtmosphere();
   introDecode();
   xhInit();
+  utInit();
   lkInit();
   cvInit();
   diagInit();
-  slInit();   // v4
-  if (bridgeUrl()) { probeBridge().catch(() => {}); gsPull().then(() => { routeFromHash(); if (isAdmin()) { keysPush(false); slLoad(true); } }); }   // v4: admin re-syncs keys + loads the server log on start
+  slInit();
+  if (bridgeUrl()) { probeBridge().catch(() => {}); gsPull().then(() => { routeFromHash(); if (isAdmin()) { keysPush(false); slLoad(true); } }); }
   handleSteamReturn();
 })();

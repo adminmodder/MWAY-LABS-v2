@@ -16,8 +16,6 @@
   <div class="brand">MWAY LABS</div>
   <div class="tabs">
     <button class="tab active" data-tab="home">HOME</button>
-    <button class="tab" data-tab="tools" data-lbl="tools">TOOLS</button>
-    <button class="tab" data-tab="bots" data-lbl="bots">BOTS</button>
     <button class="tab" data-tab="roadmap" data-lbl="roadmap">ROADMAP</button>
     <div class="tab-dd" id="tab3Dd">
       <button class="tab tab-dd-btn" id="tab3Btn" data-tab="tab3" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="tab3Menu" title="CS2" aria-label="CS2">
@@ -26,20 +24,11 @@
       <div class="tab-menu hidden" id="tab3Menu" role="menu" aria-label="CS2 tools">
         <button type="button" class="tab-menu-item" role="menuitem" data-sub="account">ACCOUNT SEARCH</button>
         <button type="button" class="tab-menu-item" role="menuitem" data-sub="crosshair">CROSSHAIR GENERATOR</button>
+        <button type="button" class="tab-menu-item" role="menuitem" data-sub="utilities">UTILITIES <span class="dd-pill beta" title="In development">BETA</span></button>
+        <button type="button" class="tab-menu-item is-off" role="menuitem" data-sub="leaderboard" disabled aria-disabled="true" title="Coming soon">LEADERBOARD <span class="dd-pill soon">COMING SOON</span></button>
       </div>
     </div>
-    <button class="tab tab-icon" id="phoneBtn" data-tab="phone" title="Encrypted Phone" aria-label="Encrypted Phone">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="6.5" y="2" width="11" height="20" rx="2.6"/>
-        <path d="M10.5 4.8h3"/>
-        <rect x="9.4" y="11.2" width="5.2" height="4.2" rx=".9"/>
-        <path d="M10.5 11.2V10a1.5 1.5 0 0 1 3 0v1.2"/>
-        <circle cx="12" cy="13.3" r=".6" fill="currentColor" stroke="none"/>
-        <path d="M10.8 19.2h2.4"/>
-      </svg>
-      <span class="sr-only" data-lbl="phone">Encrypted Phone</span>
-    </button>
-    <button class="tab admin-only hidden" data-tab="admin">ADMIN<span class="rv-dot hidden" id="rvDot">0</span></button>
+    <button class="tab admin-only hidden" data-tab="admin">ADMIN</button>
   </div>
   <div class="nav-right">
     <a id="discordBtn" class="icon-btn" href="https://discord.gg/uMDagqPnUx" target="_blank" rel="noopener" title="Discord" aria-label="Discord">
@@ -95,15 +84,15 @@
       </div>
     </div>
 
-    <div id="featuredSection">
+    <div id="pinnedSection">
       <div class="section-head">
-        <h2 class="section-title" id="featuredTitle">Latest Tools &amp; Bots</h2>
+        <h2 class="section-title" id="pinnedTitle"></h2>
         <div class="head-tools admin-only hidden">
-          <label class="toggle"><input id="featuredToggle" type="checkbox"> Visible to visitors</label>
-          <button id="editFeaturedBtn" class="btn btn-small">Edit Section</button>
+          <label class="toggle"><input id="pinnedToggle" type="checkbox"> Visible to visitors</label>
+          <button id="editPinnedBtn" class="btn btn-small">Edit Section</button>
         </div>
       </div>
-      <div id="featuredBody" class="tool-grid featured-grid"></div>
+      <div id="pinnedBody" class="pin-grid"></div>
     </div>
 
     <div id="roadmapSection">
@@ -116,35 +105,23 @@
 
     <div id="steamSection">
       <div class="section-head">
-        <h2 class="section-title">My Steam Accounts</h2>
-        <label class="toggle admin-only hidden"><input id="steamToggle" type="checkbox"> Visible to visitors</label>
+        <h2 class="section-title" id="steamTitle"></h2>
+        <div class="head-tools admin-only hidden">
+          <label class="toggle"><input id="steamToggle" type="checkbox"> Visible to visitors</label>
+          <button id="editSteamBtn" class="btn btn-small">Edit</button>
+        </div>
+      </div>
+      <div id="steamEdit" class="panel hidden">
+        <span class="flabel">Title</span>
+        <input id="steamTitleInput" maxlength="60" placeholder="My Steam Accounts">
+        <div class="row">
+          <button id="saveSteam" class="btn btn-primary btn-small">Save</button>
+          <button id="cancelSteam" class="btn btn-small">Cancel</button>
+        </div>
       </div>
       <div id="steamGrid" class="steam-grid"></div>
     </div>
 
-    <div id="quickBtns" class="actions"></div>
-  </section>
-
-  <!-- TOOLS -->
-  <section id="tools" class="page">
-    <h2 class="section-title">Developer Tools</h2>
-    <div id="adminPanel" class="panel admin-only hidden">
-      <div class="panel-head"><h2>Admin Panel</h2><span class="badge">RESTRICTED</span></div>
-      <div id="publishForm"></div>
-      <button id="publishBtn" class="btn btn-primary">Publish Tool</button>
-    </div>
-    <div id="toolList" class="tool-grid"></div>
-  </section>
-
-  <!-- BOTS -->
-  <section id="bots" class="page">
-    <h2 class="section-title">Discord Bots</h2>
-    <div id="botAdminPanel" class="panel admin-only hidden">
-      <div class="panel-head"><h2>Bot Admin Panel</h2><span class="badge">RESTRICTED</span></div>
-      <div id="botPublishForm"></div>
-      <button id="botPublishBtn" class="btn btn-primary">Publish Bot</button>
-    </div>
-    <div id="botList" class="tool-grid"></div>
   </section>
 
   <!-- ROADMAP -->
@@ -222,11 +199,25 @@
       </div>
       <div id="xhSavedWrap" class="hidden"><span class="flabel mt-s">Your saved crosshairs</span><div id="xhSaved" class="xh-list"></div></div>
     </div>
-  </section>
 
-  <section id="phone" class="page">
-    <h2 class="section-title" data-lbl="phone">Encrypted Phone</h2>
-    <div class="panel"><p class="muted">Reserved module. Content coming soon.</p></div>
+    <div class="panel ut-panel" id="utPanel" data-subpage="utilities">
+      <div class="panel-head"><h2>CS2 Utilities <span class="dd-pill beta">BETA</span></h2><span class="badge">LINEUP MAP</span></div>
+      <p class="muted" id="utIntro"></p>
+      <div class="ut-maps" id="utMaps" role="tablist" aria-label="CS2 maps"></div>
+      <div class="ut-bar">
+        <div class="ut-types" id="utTypes" role="group" aria-label="Filter by utility type"></div>
+        <div class="ut-actions"><span class="muted" id="utCount"></span><button id="utPlace" type="button" class="btn btn-primary btn-small" aria-pressed="false">+ Add marker</button></div>
+      </div>
+      <p class="muted" id="utMsg" role="status"></p>
+      <div class="ut-layout">
+        <div class="ut-board" id="utBoard" aria-label="Map. Click to place or select a marker.">
+          <img id="utImg" alt="" draggable="false">
+          <div class="ut-fallback" id="utFallback" aria-hidden="true"><span id="utFbName"></span><small id="utFbHint"></small></div>
+          <div class="ut-pins" id="utPins"></div>
+        </div>
+        <aside class="ut-side" id="utSide" aria-live="polite"></aside>
+      </div>
+    </div>
   </section>
 
   <!-- ADMIN -->
@@ -240,32 +231,19 @@
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Navigation Module Visibility</h2></div>
-        <label class="toggle"><input type="checkbox" data-tabkey="tools"> <span data-lbl="tools">TOOLS</span></label>
         <label class="toggle"><input type="checkbox" data-tabkey="tab3"> <span data-lbl="tab3">Gaming</span></label>
-        <label class="toggle"><input type="checkbox" data-tabkey="bots"> <span data-lbl="bots">BOTS</span></label>
         <label class="toggle"><input type="checkbox" data-tabkey="roadmap"> <span data-lbl="roadmap">ROADMAP</span></label>
-        <label class="toggle"><input type="checkbox" data-tabkey="phone"> <span data-lbl="phone">Encrypted Phone</span></label>
         <label class="toggle"><input id="cvToggle" type="checkbox"> Steam IDs Converter <span class="muted">(panel on the Gaming tab)</span></label>
         <p class="muted">Unchecked tabs and panels are hidden from visitors; you still see them dimmed.</p>
       </div>
     </div>
 
     <div class="panel mt">
-      <div class="panel-head"><h2>Review Moderation</h2><span class="badge" id="rvCount">0 PENDING</span></div>
-      <div class="row" id="rvFilter"><button type="button" class="btn btn-small" data-f="pending">Pending</button><button type="button" class="btn btn-small" data-f="approved">Approved</button><button type="button" class="btn btn-small" data-f="rejected">Rejected</button><button type="button" class="btn btn-small" data-f="all">All</button></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>User</th><th>Rating</th><th>Comment</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody id="rvBody"></tbody></table></div>
-      <p class="muted">Only accepted ratings are shown publicly (as a badge). Comments are visible to admins only.</p>
-    </div>
-
-    <div class="panel mt">
       <div class="panel-head"><h2>Navigation Renaming Center</h2><span class="badge">LABELS</span></div>
       <div class="form-grid">
         <div><span class="flabel">Home tab (locked)</span><input value="HOME" disabled aria-label="Home tab name is locked"></div>
-        <div><span class="flabel">Tools tab label</span><input id="nlTools" maxlength="20"></div>
         <div><span class="flabel">Gaming tab tooltip / label</span><input id="nlTab3" maxlength="20"></div>
-        <div><span class="flabel">Bots tab label</span><input id="nlBots" maxlength="20"></div>
         <div><span class="flabel">Roadmap tab label</span><input id="nlRoadmap" maxlength="20"></div>
-        <div><span class="flabel">Encrypted Phone tooltip / label</span><input id="nlPhone" maxlength="20"></div>
       </div>
       <div class="row">
         <button id="saveNav" class="btn btn-primary btn-small">Save Labels</button>
@@ -276,7 +254,7 @@
 
     <div class="panel mt">
       <div class="panel-head"><h2>Global Sync</h2><span class="badge">PUBLISH TO VISITORS</span></div>
-      <p class="muted">Settings, tools and bots are stored in this browser and also published through your Cloudflare Worker (needs the bridge URL below, a KV namespace bound as <code>MWAY_KV</code> and the <code>ADMIN_TOKEN</code> secret). Visitors on any device load the published copy. API keys and the bridge URL are never published to visitors. API keys you type below are sent only to your Worker (stored in its KV) and take effect immediately. &quot;Refresh Server / Force Update&quot; re-publishes everything and makes every open page re-apply it within ~10-15 s.</p>
+      <p class="muted">Settings are stored in this browser and also published through your Cloudflare Worker (needs the bridge URL below, a KV namespace bound as <code>MWAY_KV</code> and the <code>ADMIN_TOKEN</code> secret). Visitors on any device load the published copy. API keys and the bridge URL are never published to visitors. API keys you type below are sent only to your Worker (stored in its KV) and take effect immediately. &quot;Refresh Server / Force Update&quot; re-publishes everything and makes every open page re-apply it within ~10-15 s.</p>
       <div><span class="flabel">Worker ADMIN_TOKEN (kept in this browser only)</span>
         <div class="field"><input id="gsToken" type="password" autocomplete="off" spellcheck="false" placeholder="the ADMIN_TOKEN secret of your Worker"><button type="button" class="btn btn-small" data-reveal="#gsToken">Show</button></div></div>
       <div class="row">
@@ -364,11 +342,6 @@
       <p class="muted">Sign-ups are stored in this browser's localStorage (no server), so this list only contains addresses submitted from this browser. Export regularly.</p>
     </div>
 
-    <div class="hub-split mt">
-      <div class="panel"><div class="panel-head"><h2>Central Master File Hub: Tools</h2><span class="badge">ALL VERSIONS</span></div><div id="hubGridTools" class="hub-grid"></div></div>
-      <div class="panel"><div class="panel-head"><h2>Central Master File Hub: Bots</h2><span class="badge">ALL VERSIONS</span></div><div id="hubGridBots" class="hub-grid"></div></div>
-    </div>
-
     <div class="panel mt" id="slPanel">
       <div class="panel-head"><h2>Server Error &amp; API Log</h2><span class="badge">CLOUDFLARE WORKER</span></div>
       <div class="dg-bar">
@@ -408,11 +381,6 @@
       <div id="dgTerm" class="terminal dg-term" role="log" aria-live="off"></div>
       <p class="muted" id="dgCount"></p>
       <p class="muted">Records Steam, bridge and proxy requests, Steam login steps and script errors from this browser. Only host and path are logged; API keys, bearer tokens and login signatures are removed before anything is stored, shown or copied. "Run diagnostics" tests this page, the bridge (/health, Steam API, Steam Community, OpenID, Worker-to-Steam) and your key. The log is kept in this browser's localStorage (last 150 events).</p>
-    </div>
-
-    <div class="panel mt">
-      <div class="panel-head"><h2>System Audit Logs</h2><button id="clearLogs" class="btn btn-small btn-danger">Clear</button></div>
-      <div id="terminal" class="terminal"></div>
     </div>
   </section>
 </main>
