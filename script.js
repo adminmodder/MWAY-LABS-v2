@@ -774,10 +774,17 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
   /* Cloudflare Worker bridge (worker.js). Hosts the Worker will forward (mirrors UPSTREAM_ALLOW in worker.js). */
   const BRIDGE_HOSTS = ['api.steampowered.com', 'steamcommunity.com', 'api-public.cs-prod.leetify.com', 'csfloat.com', 'api.csgofloat.com', 'prices.csgotrader.app', 'open.faceit.com'];
-  const bridgeUrl = () => {
-    const u = String((settings.steamCfg && settings.steamCfg.bridge) || BRIDGE_CONFIG.url || '').trim().replace(/\/+$/, '');
-    return /^https:\/\/[^\s/]+/i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(u) ? u : '';
+  /* v11: a bridge saved without the scheme ("mway-bridge.venovfx.workers.dev"), with a path, quotes or spaces used to be rejected as
+     "not valid", which switched the bridge OFF and sent every call through the (blocked) public proxies. It is now repaired: scheme added,
+     path / query removed. An unusable value falls back to BRIDGE_CONFIG.url instead of disabling the bridge. */
+  const normBridge = raw => {
+    let u = String(raw || '').trim().replace(/^["'<\s]+|["'>\s]+$/g, '');
+    if (!u) return '';
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(u) ? 'http://' : 'https://') + u.replace(/^\/+/, '');
+    u = u.replace(/^(https?:\/\/[^\/?#\s]+).*$/i, '$1').replace(/\/+$/, '');
+    return /^https:\/\/[^\s/]+\.[^\s/]+$/i.test(u) || /^https:\/\/localhost(:\d+)?$/i.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(u) ? u : '';
   };
+  const bridgeUrl = () => normBridge(settings.steamCfg && settings.steamCfg.bridge) || normBridge(BRIDGE_CONFIG.url);
   const bridgeCan = url => { if (!bridgeUrl()) return false; try { const u = new URL(url); return u.protocol === 'https:' && BRIDGE_HOSTS.includes(u.hostname); } catch { return false; } };
   let bridgeCaps = null, bridgeErr = '', bridgeProbeP = null, bridgeProbeAt = 0;
   const bridgeHoldsKey = () => !!(bridgeCaps && bridgeCaps.steamKey && bridgeCaps.url === bridgeUrl());
@@ -1017,7 +1024,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const cfg = settings.steamCfg;
     const keysBefore = { steam: cfg.key, csfloat: cfg.floatKey, leetify: cfg.leetifyKey, faceit: cfg.faceitKey};   // v4
     cfg.key = $('#stKey').value.trim(); cfg.proxy = $('#stProxy').value.trim(); cfg.accounts = $('#stIds').value;
-    cfg.bridge = $('#stBridge').value.trim().replace(/\/+$/, ''); cfg.bridgeOnly = $('#stBridgeOnly').checked;
+    cfg.bridge = normBridge($('#stBridge').value) || $('#stBridge').value.trim().replace(/\/+$/, ''); cfg.bridgeOnly = $('#stBridgeOnly').checked;
     cfg.faceitKey = $('#stFaceit').value.trim();
     if ($('#stFaceitName')) cfg.faceitKeyName = $('#stFaceitName').value.trim();
     cfg.floatKey = $('#stFloat').value.trim(); cfg.hltvKey = $('#stHltvKey').value.trim(); cfg.hltvUrl = $('#stHltvUrl').value.trim(); cfg.leetifyKey = $('#stLeetify').value.trim();
@@ -1496,7 +1503,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $$('[data-tabkey]').forEach(c => c.checked = settings.tabs[c.dataset.tabkey]);
     renderNavInputs();
     $('#stKey').value = settings.steamCfg.key; $('#stProxy').value = settings.steamCfg.proxy; $('#stIds').value = settings.steamCfg.accounts;
-    $('#stBridge').value = settings.steamCfg.bridge || ''; $('#stBridgeOnly').checked = settings.steamCfg.bridgeOnly !== false;
+    $('#stBridge').value = normBridge(settings.steamCfg.bridge) || settings.steamCfg.bridge || ''; $('#stBridgeOnly').checked = settings.steamCfg.bridgeOnly !== false;
     const fcg = settings.steamCfg;
     if (isAdmin() && !fcg.faceitSeeded) {   // one-time pre-configuration of the FACEIT key (an admin who clears the field later keeps it empty)
       if (!fcg.faceitKeyName) fcg.faceitKeyName = FACEIT_DEFAULT.name;
