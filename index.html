@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MWAY LABS</title>
+<meta name="theme-color" content="#0b0e13">
+<link rel="icon" type="image/png" href="mlnbk.png">
+<link rel="apple-touch-icon" href="mlnbk.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="grid-bg"></div>
+
+<nav class="navbar">
+  <div class="brand">MWAY LABS</div>
+  <div class="tabs">
+    <button class="tab active" data-tab="home">HOME</button>
+    <button class="tab" data-tab="tools" data-lbl="tools">TOOLS</button>
+    <button class="tab" data-tab="bots" data-lbl="bots">BOTS</button>
+    <button class="tab" data-tab="roadmap" data-lbl="roadmap">ROADMAP</button>
+    <div class="tab-dd" id="tab3Dd">
+      <button class="tab tab-dd-btn" id="tab3Btn" data-tab="tab3" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="tab3Menu" title="CS2" aria-label="CS2">
+        <span data-lbl="tab3">CS2</span><svg class="dd-caret" viewBox="0 0 10 6" width="9" height="6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1l4 4 4-4"/></svg>
+      </button>
+      <div class="tab-menu hidden" id="tab3Menu" role="menu" aria-label="CS2 tools">
+        <button type="button" class="tab-menu-item" role="menuitem" data-sub="account">ACCOUNT SEARCH</button>
+        <button type="button" class="tab-menu-item" role="menuitem" data-sub="crosshair">CROSSHAIR GENERATOR</button>
+      </div>
+    </div>
+    <button class="tab tab-icon" id="phoneBtn" data-tab="phone" title="Encrypted Phone" aria-label="Encrypted Phone">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="6.5" y="2" width="11" height="20" rx="2.6"/>
+        <path d="M10.5 4.8h3"/>
+        <rect x="9.4" y="11.2" width="5.2" height="4.2" rx=".9"/>
+        <path d="M10.5 11.2V10a1.5 1.5 0 0 1 3 0v1.2"/>
+        <circle cx="12" cy="13.3" r=".6" fill="currentColor" stroke="none"/>
+        <path d="M10.8 19.2h2.4"/>
+      </svg>
+      <span class="sr-only" data-lbl="phone">Encrypted Phone</span>
+    </button>
+    <button class="tab admin-only hidden" data-tab="admin">ADMIN<span class="rv-dot hidden" id="rvDot">0</span></button>
+  </div>
+  <div class="nav-right">
+    <a id="discordBtn" class="icon-btn" href="https://discord.gg/uMDagqPnUx" target="_blank" rel="noopener" title="Discord" aria-label="Discord">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M4 5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-2.5l-1-1.5h-3l-1 1.5H7a3 3 0 0 1-3-3V5z"/><circle cx="9" cy="11" r="1.7" fill="#0b0e13"/><circle cx="15" cy="11" r="1.7" fill="#0b0e13"/></svg>
+    </a>
+    <a id="steamGroupBtn" class="icon-btn" href="https://steamcommunity.com/groups/mwaylabs" target="_blank" rel="noopener" title="Steam Group" aria-label="Steam Group">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 1.5A10.5 10.5 0 0 0 1.5 12c0 .5.04 1 .12 1.47l5.64 2.33a2.97 2.97 0 0 1 1.7-.52h.17l2.52-3.65v-.05a4 4 0 1 1 4 4h-.09l-3.6 2.57a3.02 3.02 0 0 1-5.97.67l-4-1.65A10.5 10.5 0 1 0 12 1.5zm-3.9 15.6 1.29.53a2.23 2.23 0 1 0 1.2-4.2l-1.34-.55a1.7 1.7 0 0 1-1.15 4.22zM15.9 9.4a2.66 2.66 0 1 0 0 5.32 2.66 2.66 0 0 0 0-5.32zm0 .88a1.78 1.78 0 1 1 0 3.56 1.78 1.78 0 0 1 0-3.56z"/></svg>
+    </a>
+    <button id="vaultBtn" class="vault-btn" type="button" aria-label="Locked vault. Open keypad to unlock login.">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="4" y="10.5" width="16" height="10" rx="1.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="vault-label">Locked Vault</span>
+      <span class="vault-led" aria-hidden="true"></span>
+    </button>
+    <button id="loginBtn" class="btn btn-primary hidden">Log In</button>
+    <button id="steamLoginBtn" class="btn steam-btn" type="button" title="Log in with Steam" aria-label="Log in with Steam">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 1.5A10.5 10.5 0 0 0 1.5 12c0 .5.04 1 .12 1.47l5.64 2.33a2.97 2.97 0 0 1 1.7-.52h.17l2.52-3.65v-.05a4 4 0 1 1 4 4h-.09l-3.6 2.57a3.02 3.02 0 0 1-5.97.67l-4-1.65A10.5 10.5 0 1 0 12 1.5zm-3.9 15.6 1.29.53a2.23 2.23 0 1 0 1.2-4.2l-1.34-.55a1.7 1.7 0 0 1-1.15 4.22zM15.9 9.4a2.66 2.66 0 1 0 0 5.32 2.66 2.66 0 0 0 0-5.32zm0 .88a1.78 1.78 0 1 1 0 3.56 1.78 1.78 0 0 1 0-3.56z"/></svg>
+      <span class="sl-text">Log in with Steam</span>
+    </button>
+  </div>
+</nav>
+
+<main>
+  <!-- HOME -->
+  <section id="home" class="page active">
+    <div class="hero">
+      <canvas id="cipherRain" aria-hidden="true"></canvas>
+      <div class="hero-tag"><span class="dot" aria-hidden="true"></span><span id="heroTagText"></span> <button id="editTagBtn" class="btn btn-small admin-only hidden">Edit</button></div>
+      <h1 class="glitch" data-text="MWAY LABS">MWAY LABS</h1>
+      <p class="sub"><span id="subText"></span> <button id="editSubBtn" class="btn btn-small admin-only hidden">Edit</button></p>
+      <div class="scanline"></div>
+    </div>
+
+    <div class="panel" id="aboutSection">
+      <div class="panel-head">
+        <h2 id="aboutTitle"></h2>
+        <div class="head-tools admin-only hidden">
+          <label class="toggle"><input id="aboutToggle" type="checkbox"> Visible to visitors</label>
+          <button id="editAboutBtn" class="btn btn-small">Edit</button>
+        </div>
+      </div>
+      <p id="aboutText"></p>
+      <div id="aboutEdit" class="hidden">
+        <span class="flabel">Title</span>
+        <input id="aboutTitleInput" maxlength="60" placeholder="About Me">
+        <span class="flabel mt-s">Description</span>
+        <textarea id="aboutInput" rows="5"></textarea>
+        <div class="row">
+          <button id="saveAbout" class="btn btn-primary btn-small">Save</button>
+          <button id="cancelAbout" class="btn btn-small">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="featuredSection">
+      <div class="section-head">
+        <h2 class="section-title" id="featuredTitle">Latest Tools &amp; Bots</h2>
+        <div class="head-tools admin-only hidden">
+          <label class="toggle"><input id="featuredToggle" type="checkbox"> Visible to visitors</label>
+          <button id="editFeaturedBtn" class="btn btn-small">Edit Section</button>
+        </div>
+      </div>
+      <div id="featuredBody" class="tool-grid featured-grid"></div>
+    </div>
+
+    <div id="roadmapSection">
+      <div class="section-head">
+        <h2 class="section-title">Roadmap Progress</h2>
+        <label class="toggle admin-only hidden"><input id="roadmapToggle" type="checkbox"> Visible to visitors</label>
+      </div>
+      <div id="roadmapWidget" class="panel rm-widget" role="link" tabindex="0" aria-label="Open the roadmap"></div>
+    </div>
+
+    <div id="steamSection">
+      <div class="section-head">
+        <h2 class="section-title">My Steam Accounts</h2>
+        <label class="toggle admin-only hidden"><input id="steamToggle" type="checkbox"> Visible to visitors</label>
+      </div>
+      <div id="steamGrid" class="steam-grid"></div>
+    </div>
+
+    <div id="quickBtns" class="actions"></div>
+  </section>
+
+  <!-- TOOLS -->
+  <section id="tools" class="page">
+    <h2 class="section-title">Developer Tools</h2>
+    <div id="adminPanel" class="panel admin-only hidden">
+      <div class="panel-head"><h2>Admin Panel</h2><span class="badge">RESTRICTED</span></div>
+      <div id="publishForm"></div>
+      <button id="publishBtn" class="btn btn-primary">Publish Tool</button>
+    </div>
+    <div id="toolList" class="tool-grid"></div>
+  </section>
+
+  <!-- BOTS -->
+  <section id="bots" class="page">
+    <h2 class="section-title">Discord Bots</h2>
+    <div id="botAdminPanel" class="panel admin-only hidden">
+      <div class="panel-head"><h2>Bot Admin Panel</h2><span class="badge">RESTRICTED</span></div>
+      <div id="botPublishForm"></div>
+      <button id="botPublishBtn" class="btn btn-primary">Publish Bot</button>
+    </div>
+    <div id="botList" class="tool-grid"></div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section id="roadmap" class="page">
+    <h2 class="section-title" data-lbl="roadmap">ROADMAP</h2>
+    <div id="rmMain" class="panel"></div>
+    <div id="rmAdmin" class="panel admin-only hidden mt">
+      <div class="panel-head"><h2>Roadmap Editor</h2><span class="badge">MILESTONES</span></div>
+      <div id="rmRows" class="rm-rows"></div>
+      <span class="flabel">Add milestone</span>
+      <div class="rm-add">
+        <input id="rmNewName" maxlength="40" placeholder="Milestone name" aria-label="New milestone name">
+        <input id="rmNewDesc" maxlength="140" placeholder="Short description (optional)" aria-label="New milestone description">
+        <select id="rmNewStatus" aria-label="New milestone status"><option value="planned">Planned</option><option value="active">In progress</option><option value="done">Reached</option></select>
+        <button id="rmAdd" class="btn btn-primary btn-small" type="button">Add</button>
+      </div>
+      <p class="muted">Changes save instantly. Progress is the share of reached milestones, with in-progress ones counting half.</p>
+    </div>
+  </section>
+
+  <section id="tab3" class="page">
+    <h2 class="section-title" data-lbl="tab3">Gaming</h2>
+    <div class="panel" id="lkPanel" data-subpage="account">
+      <span class="lk-ver" title="CS2 account search tool, version 1" aria-label="Version 1">V1</span>
+      <div class="panel-head"><h2>Steam / CS2 Player Lookup</h2><span class="badge">PROFILE + RANKS</span></div>
+      <div class="field"><input id="lkIn" placeholder="Steam profile URL, SteamID64, SteamID2/3, account ID or custom name" autocomplete="off" spellcheck="false" aria-label="Steam profile to look up"><button id="lkGo" type="button" class="btn btn-primary btn-small">Search</button></div>
+      <p class="muted" id="lkMsg" role="status"></p>
+      <div id="lkOut"></div>
+    </div>
+
+    <details class="panel mt cv-panel" id="cvPanel" data-subpage="account">
+      <summary class="cv-sum"><h2>Steam IDs Converter</h2><span class="badge">ALL FORMATS</span></summary>
+      <div class="cv-body">
+        <p class="muted">Paste a SteamID64, SteamID2 (STEAM_0 / STEAM_1), SteamID3, account ID, profile link or custom name. Separate several entries with spaces, commas or new lines (up to 12). Each one is converted into every format.</p>
+        <textarea id="cvIn" rows="3" spellcheck="false" autocomplete="off" aria-label="Steam IDs to convert" placeholder="76561197960287930&#10;STEAM_0:0:11101&#10;[U:1:22202]&#10;https://steamcommunity.com/id/gabelogannewell"></textarea>
+        <div class="row">
+          <button id="cvGo" type="button" class="btn btn-primary btn-small">Convert</button>
+          <button id="cvClear" type="button" class="btn btn-small">Clear</button>
+          <button id="cvMine" type="button" class="btn btn-small hidden">Use my SteamID</button>
+        </div>
+        <p class="muted" id="cvMsg" role="status"></p>
+        <div id="cvOut"></div>
+      </div>
+    </details>
+
+    <div class="panel" id="xhPanel" data-subpage="crosshair">
+      <span class="lk-ver" title="CS2 crosshair generator, version 1" aria-label="Version 1">V1</span>
+      <div class="panel-head"><h2>CS2 Crosshair Generator</h2><span class="badge">IMPORT CODE</span></div>
+      <div class="xh-layout">
+        <div class="xh-side">
+          <canvas id="xhCv" width="300" height="300" class="xh-cv"></canvas>
+          <div class="xh-bgs" id="xhBgs" role="group" aria-label="Preview background"><button type="button" class="btn btn-small on" data-bg="#161b24" aria-pressed="true">Dark</button><button type="button" class="btn btn-small" data-map="dust" aria-pressed="false" title="Dust II: A Site / Mid (click again to switch view)">DUST</button><button type="button" class="btn btn-small" data-map="nuke" aria-pressed="false" title="Nuke: Ramp / A Site (click again to switch view)">NUKE</button><button type="button" class="btn btn-small" data-map="cache" aria-pressed="false" title="Cache: Mid / Main (click again to switch view)">CACHE</button></div>
+          <p class="muted xh-bglbl" id="xhBgLbl" role="status"></p>
+          <p class="muted xh-px" id="xhPx" role="status"></p>
+          <span class="flabel">Share code (export)</span>
+          <div class="field"><input id="xhOut" readonly aria-label="CS2 crosshair code"><button id="xhCopy" type="button" class="btn btn-small">Copy</button></div>
+          <span class="flabel">Import a share code</span>
+          <div class="field"><input id="xhImp" placeholder="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx or CS&hellip;" autocomplete="off" spellcheck="false" aria-label="Paste a CS2 crosshair share code to import"><button id="xhImpGo" type="button" class="btn btn-small">Import</button></div>
+          <p class="muted xh-imp" id="xhImpMsg" role="status"></p>
+          <div class="row"><button id="xhSave" type="button" class="btn btn-small hidden">Save to account</button></div>
+          <p class="muted" id="xhHint">Log in (or log in with Steam) to save crosshairs to your account.</p>
+          <p class="muted">September 2026 &ldquo;Rush Hour&rdquo; format (build 1.41.8.8+): length, thickness and gap are whole pixels at 1280x720 and scale with your resolution. Valve changed the share-code format again on 30 Sep, so import codes may be rejected; the old-command converter below is the reliable way to move an old setup across. The preview is approximate; outline weight is preview only because the game no longer has an outline thickness setting.</p>
+        </div>
+        <div class="xh-main">
+          <span class="flabel">Default crosshairs</span><div id="xhDefs" class="xh-list"></div>
+          <div id="xhCtl" class="form-grid mt-s"></div>
+          <details class="xh-leg mt-s">
+            <summary>Convert old (pre-22 Sep) console commands</summary>
+            <textarea id="xhLegIn" rows="4" spellcheck="false" placeholder="cl_crosshairsize 3; cl_crosshairgap -2; cl_crosshairthickness 1; cl_crosshairalpha 255" aria-label="Old crosshair commands"></textarea>
+            <div class="row"><button id="xhLegGo" type="button" class="btn btn-small">Convert</button><button id="xhLegApply" type="button" class="btn btn-small">Apply to generator</button></div>
+            <textarea id="xhLegOut" class="xh-cmd" rows="5" readonly spellcheck="false" aria-label="Converted commands"></textarea>
+            <p class="muted" id="xhLegNote" role="status"></p>
+          </details>
+        </div>
+      </div>
+      <div id="xhSavedWrap" class="hidden"><span class="flabel mt-s">Your saved crosshairs</span><div id="xhSaved" class="xh-list"></div></div>
+    </div>
+  </section>
+
+  <section id="phone" class="page">
+    <h2 class="section-title" data-lbl="phone">Encrypted Phone</h2>
+    <div class="panel"><p class="muted">Reserved module. Content coming soon.</p></div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="admin" class="page">
+    <h2 class="section-title">Admin Console</h2>
+    <div class="admin-grid">
+      <div class="panel">
+        <div class="panel-head"><h2>Discord Configuration</h2></div>
+        <input id="discordInput" placeholder="https://discord.gg/your-invite">
+        <div class="row"><button id="saveDiscord" class="btn btn-primary btn-small">Save Link</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Navigation Module Visibility</h2></div>
+        <label class="toggle"><input type="checkbox" data-tabkey="tools"> <span data-lbl="tools">TOOLS</span></label>
+        <label class="toggle"><input type="checkbox" data-tabkey="tab3"> <span data-lbl="tab3">Gaming</span></label>
+        <label class="toggle"><input type="checkbox" data-tabkey="bots"> <span data-lbl="bots">BOTS</span></label>
+        <label class="toggle"><input type="checkbox" data-tabkey="roadmap"> <span data-lbl="roadmap">ROADMAP</span></label>
+        <label class="toggle"><input type="checkbox" data-tabkey="phone"> <span data-lbl="phone">Encrypted Phone</span></label>
+        <label class="toggle"><input id="cvToggle" type="checkbox"> Steam IDs Converter <span class="muted">(panel on the Gaming tab)</span></label>
+        <p class="muted">Unchecked tabs and panels are hidden from visitors; you still see them dimmed.</p>
+      </div>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>Review Moderation</h2><span class="badge" id="rvCount">0 PENDING</span></div>
+      <div class="row" id="rvFilter"><button type="button" class="btn btn-small" data-f="pending">Pending</button><button type="button" class="btn btn-small" data-f="approved">Approved</button><button type="button" class="btn btn-small" data-f="rejected">Rejected</button><button type="button" class="btn btn-small" data-f="all">All</button></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>User</th><th>Rating</th><th>Comment</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody id="rvBody"></tbody></table></div>
+      <p class="muted">Only accepted ratings are shown publicly (as a badge). Comments are visible to admins only.</p>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>Navigation Renaming Center</h2><span class="badge">LABELS</span></div>
+      <div class="form-grid">
+        <div><span class="flabel">Home tab (locked)</span><input value="HOME" disabled aria-label="Home tab name is locked"></div>
+        <div><span class="flabel">Tools tab label</span><input id="nlTools" maxlength="20"></div>
+        <div><span class="flabel">Gaming tab tooltip / label</span><input id="nlTab3" maxlength="20"></div>
+        <div><span class="flabel">Bots tab label</span><input id="nlBots" maxlength="20"></div>
+        <div><span class="flabel">Roadmap tab label</span><input id="nlRoadmap" maxlength="20"></div>
+        <div><span class="flabel">Encrypted Phone tooltip / label</span><input id="nlPhone" maxlength="20"></div>
+      </div>
+      <div class="row">
+        <button id="saveNav" class="btn btn-primary btn-small">Save Labels</button>
+        <button id="resetNav" class="btn btn-small">Restore Defaults</button>
+      </div>
+      <p class="muted">The Home tab name cannot be changed. The gaming tab keeps its controller icon; its label is used as tooltip and screen-reader text.</p>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>Global Sync</h2><span class="badge">PUBLISH TO VISITORS</span></div>
+      <p class="muted">Settings, tools and bots are stored in this browser and also published through your Cloudflare Worker (needs the bridge URL below, a KV namespace bound as <code>MWAY_KV</code> and the <code>ADMIN_TOKEN</code> secret). Visitors on any device load the published copy. API keys and the bridge URL are never published to visitors. API keys you type below are sent only to your Worker (stored in its KV) and take effect immediately. &quot;Refresh Server / Force Update&quot; re-publishes everything and makes every open page re-apply it within ~10-15 s.</p>
+      <div><span class="flabel">Worker ADMIN_TOKEN (kept in this browser only)</span>
+        <div class="field"><input id="gsToken" type="password" autocomplete="off" spellcheck="false" placeholder="the ADMIN_TOKEN secret of your Worker"><button type="button" class="btn btn-small" data-reveal="#gsToken">Show</button></div></div>
+      <div class="row">
+        <button id="gsPublish" type="button" class="btn btn-primary btn-small">Save token &amp; publish now</button>
+        <button id="gsForce" type="button" class="btn btn-primary btn-small" title="Pushes the current setup and bumps the revision so every open page re-applies it">Refresh Server / Force Update</button>
+        <button id="gsPull" type="button" class="btn btn-small">Reload from server</button>
+      </div>
+      <p class="muted" id="gsStatus" role="status"></p>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>Steam API Provisioning Tool</h2><span class="badge">PROFILE SYNC</span></div>
+      <div class="form-grid">
+        <div><span class="flabel">Steam Web API Key</span>
+          <div class="field"><input id="stKey" type="password" autocomplete="off" spellcheck="false" placeholder="32-character key"><button id="stKeyShow" type="button" class="btn btn-small">Show</button></div></div>
+        <div class="span2"><span class="flabel">Cloudflare Worker bridge URL (recommended: handles Steam CORS and verifies Steam logins)</span>
+          <div class="field"><input id="stBridge" autocomplete="off" spellcheck="false" placeholder="https://your-bridge.your-name.workers.dev"><button id="stBridgeTest" type="button" class="btn btn-small">Save &amp; test</button></div>
+          <label class="toggle"><input id="stBridgeOnly" type="checkbox"> Bridge only: never fall back to public proxies for Steam, Leetify, CSFloat and price requests</label></div>
+        <div><span class="flabel">Custom CORS proxy (optional, replaces the built-in proxies)</span><input id="stProxy" autocomplete="off" spellcheck="false" placeholder="https://your-proxy.example/?url={url}"></div>
+        <div><span class="flabel">CSFloat API key (optional, adds CSFloat values next to Steam Market values)</span>
+          <div class="field"><input id="stFloat" type="password" autocomplete="off" spellcheck="false" placeholder="CSFloat key"><button type="button" class="btn btn-small" data-reveal="#stFloat">Show</button><button id="stFloatTest" type="button" class="btn btn-small">Re-test key</button></div>
+          <p class="muted" id="stFloatStatus" role="status"></p></div>
+        <div><span class="flabel">FACEIT API key name</span>
+          <input id="stFaceitName" autocomplete="off" spellcheck="false" placeholder="Key_SdwTkNnNaR" value="Key_SdwTkNnNaR"></div>
+        <div><span class="flabel">FACEIT Data API key (server-side key: FACEIT level, ELO and skill badge in the CS2 lookup)</span>
+          <div class="field"><input id="stFaceit" type="password" autocomplete="off" spellcheck="false" placeholder="FACEIT server-side key"><button type="button" class="btn btn-small" data-reveal="#stFaceit">Show</button><button id="stFaceitTest" type="button" class="btn btn-small">Test FACEIT Key</button></div>
+          <p class="muted" id="stFaceitStatus" role="status"></p></div>
+        <div><span class="flabel">Leetify API key (optional, used if Leetify requires authentication)</span>
+          <div class="field"><input id="stLeetify" type="password" autocomplete="off" spellcheck="false" placeholder="Leetify key"><button type="button" class="btn btn-small" data-reveal="#stLeetify">Show</button></div></div>
+        <div><span class="flabel">HLTV rating API key (optional)</span>
+          <div class="field"><input id="stHltvKey" type="password" autocomplete="off" spellcheck="false" placeholder="HLTV / scraper key"><button type="button" class="btn btn-small" data-reveal="#stHltvKey">Show</button></div></div>
+        <div><span class="flabel">HLTV rating endpoint (https URL, use {steamid} or {name})</span><input id="stHltvUrl" autocomplete="off" spellcheck="false" placeholder="https://your-service.example/hltv?steam={steamid}"></div>
+        <div class="span2"><span class="flabel">SteamID64s, vanity names or profile URLs (one per line)</span><textarea id="stIds" rows="4" spellcheck="false"></textarea></div>
+      </div>
+      <div class="row">
+        <button id="stSave" class="btn btn-small">Save Settings</button>
+        <button id="stKeysPush" type="button" class="btn btn-small" title="Re-send every API key to the Worker and test it">Send keys to server now</button>
+        <button id="stSync" class="btn btn-primary btn-small">Sync &amp; Update Profiles</button>
+      </div>
+      <p class="muted" id="stStatus" role="status"></p>
+      <p class="muted">With a bridge URL set, every Steam, Leetify, CSFloat and price request goes through your own Cloudflare Worker, and Steam logins are confirmed by the Worker itself. If the Worker holds STEAM_API_KEY, the key field above can stay empty and the key never reaches the browser. The key is stored in plain text in this browser's localStorage. Browsers block direct calls to the Steam API (CORS), so syncing automatically goes through public CORS proxies (corsproxy.io, with fallbacks). Those proxies can see your key; for a private setup enter your own proxy above. The CSFloat, Leetify and HLTV keys are stored the same way. HLTV has no public API, so the rating only appears if you point the endpoint at a service you run or trust (it may return a plain number or JSON with a "rating" field).</p>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>User Management</h2><span class="badge">PROVISIONING</span></div>
+      <div class="um-form">
+        <input id="umName" placeholder="Username" autocomplete="off">
+        <input id="umPw" placeholder="Password (min. 6)" autocomplete="new-password">
+        <select id="umRole"><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+        <button id="umGen" class="btn btn-small">Generate</button>
+        <button id="umCreate" class="btn btn-primary btn-small">Create Account</button>
+      </div>
+      <div class="error" id="umErr"></div>
+
+      <div id="otpVault" class="otp-vault hidden" role="alert">
+        <div class="otp-head"><span>One-Time Read Vault</span><span id="otpUser"></span></div>
+        <div class="otp-secret" id="otpSecret"></div>
+        <p class="muted">Shown once. Copying or dismissing wipes it from the screen and it cannot be viewed again.</p>
+        <div class="row">
+          <button id="otpCopy" class="btn btn-primary btn-small">Copy &amp; Wipe</button>
+          <button id="otpDismiss" class="btn btn-small btn-danger">Dismiss &amp; Wipe</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Username</th><th>Role</th><th>Credential Hash (SHA-256)</th><th>Created</th><th></th></tr></thead>
+          <tbody id="umBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>Mailing List</h2><span class="badge" id="mlCount">0 SUBSCRIBERS</span></div>
+      <div class="row">
+        <button id="mlExport" class="btn btn-primary btn-small" type="button">Export CSV</button>
+        <button id="mlClear" class="btn btn-small btn-danger" type="button">Clear List</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Email</th><th>Subscribed</th><th></th></tr></thead>
+          <tbody id="mlBody"></tbody>
+        </table>
+      </div>
+      <p class="muted">Sign-ups are stored in this browser's localStorage (no server), so this list only contains addresses submitted from this browser. Export regularly.</p>
+    </div>
+
+    <div class="hub-split mt">
+      <div class="panel"><div class="panel-head"><h2>Central Master File Hub: Tools</h2><span class="badge">ALL VERSIONS</span></div><div id="hubGridTools" class="hub-grid"></div></div>
+      <div class="panel"><div class="panel-head"><h2>Central Master File Hub: Bots</h2><span class="badge">ALL VERSIONS</span></div><div id="hubGridBots" class="hub-grid"></div></div>
+    </div>
+
+    <div class="panel mt" id="slPanel">
+      <div class="panel-head"><h2>Server Error &amp; API Log</h2><span class="badge">CLOUDFLARE WORKER</span></div>
+      <div class="dg-bar">
+        <button id="slRefresh" type="button" class="btn btn-primary btn-small">Refresh</button>
+        <button id="slTest" type="button" class="btn btn-small">Test API keys now</button>
+        <button id="slDownload" type="button" class="btn btn-small">Download log (.txt)</button>
+        <button id="slClear" type="button" class="btn btn-small btn-danger">Clear</button>
+        <label class="toggle"><input id="slErrOnly" type="checkbox"> Warnings &amp; errors only</label>
+      </div>
+      <div id="slKeys" class="dg-checks" aria-live="polite"></div>
+      <div id="slTerm" class="terminal dg-term" role="log" aria-live="off"></div>
+      <p class="muted" id="slCount"></p>
+      <p class="muted">Written by the Worker itself, so it also shows what other visitors hit: whether each API key is working or failing, Steam OpenID timeouts and rejections, blocked origins (ALLOWED_ORIGINS), inventory 429 cooldowns, upstream errors and Worker crashes. Needs the bridge URL and ADMIN_TOKEN above. Keys are shown only as &quot;ends with&quot; four characters, never in full.</p>
+    </div>
+
+    <div class="panel mt" id="dgPanel">
+      <div class="panel-head"><h2>Diagnostics Logger</h2><span class="badge" id="dgBadge">BRIDGE: NOT SET</span></div>
+      <div class="dg-bar">
+        <button id="dgRun" type="button" class="btn btn-primary btn-small">Run diagnostics</button>
+        <button id="dgCopy" type="button" class="btn btn-small">Copy report</button>
+        <button id="dgExport" type="button" class="btn btn-small">Export .txt</button>
+        <button id="dgClear" type="button" class="btn btn-small btn-danger">Clear</button>
+        <label class="toggle"><input id="dgPause" type="checkbox"> Pause view</label>
+      </div>
+      <div id="dgChecks" class="dg-checks" aria-live="polite"></div>
+      <div class="dg-bar">
+        <div class="dg-levels" id="dgLevels" role="group" aria-label="Filter by level">
+          <button type="button" class="btn btn-small" data-dgl="all" aria-pressed="true">All</button>
+          <button type="button" class="btn btn-small" data-dgl="info" aria-pressed="false">Info</button>
+          <button type="button" class="btn btn-small" data-dgl="ok" aria-pressed="false">OK</button>
+          <button type="button" class="btn btn-small" data-dgl="warn" aria-pressed="false">Warn</button>
+          <button type="button" class="btn btn-small" data-dgl="error" aria-pressed="false">Error</button>
+        </div>
+        <select id="dgCat" aria-label="Filter by category"><option value="all">All categories</option><option value="bridge">bridge</option><option value="proxy">proxy</option><option value="net">net</option><option value="state">state</option><option value="openid">openid</option><option value="diag">diag</option><option value="js">js</option><option value="app">app</option></select>
+        <input id="dgSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Filter text" aria-label="Filter log text">
+      </div>
+      <div id="dgTerm" class="terminal dg-term" role="log" aria-live="off"></div>
+      <p class="muted" id="dgCount"></p>
+      <p class="muted">Records Steam, bridge and proxy requests, Steam login steps and script errors from this browser. Only host and path are logged; API keys, bearer tokens and login signatures are removed before anything is stored, shown or copied. "Run diagnostics" tests this page, the bridge (/health, Steam API, Steam Community, OpenID, Worker-to-Steam) and your key. The log is kept in this browser's localStorage (last 150 events).</p>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head"><h2>System Audit Logs</h2><button id="clearLogs" class="btn btn-small btn-danger">Clear</button></div>
+      <div id="terminal" class="terminal"></div>
+    </div>
+  </section>
+</main>
+
+<!-- Vault keypad -->
+<div id="keypadOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Vault keypad">
+  <div class="keypad" id="keypad">
+    <div class="kp-head">Vault Access</div>
+    <div class="kp-display" id="kpDots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="kp-msg" id="kpMsg" role="status">Enter 4-digit code</div>
+    <div class="kp-grid" id="kpGrid"></div>
+    <button id="kpClose" class="btn btn-small kp-close" type="button">Cancel</button>
+  </div>
+</div>
+
+<div id="modalOverlay" class="overlay hidden">
+  <div class="modal" id="modal"></div>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
