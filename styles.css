@@ -681,3 +681,4 @@ input[type=range]{padding:0;border:0;accent-color:var(--accent);background:none}
 .fr-b{display:flex;flex-direction:column;gap:5px;min-width:0}.fr-t{font:700 13px var(--mono);letter-spacing:.1em;text-transform:uppercase}.fr-card.bad .fr-t{color:#ff8a9c}
 .fr-chips{display:flex;gap:6px;flex-wrap:wrap}
 .fr-chip{display:inline-flex;align-items:center;gap:6px;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#fff;background:#a62d42;border:1px solid var(--danger);padding:3px 8px}.fr-chip b{font-size:12px}
+.xh-cv.xh-steam{image-rendering:auto}

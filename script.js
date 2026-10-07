@@ -1936,15 +1936,66 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const c = XSCN[k][v];
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.s0}"/><stop offset="1" stop-color="${c.s1}"/></linearGradient><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.f0}"/><stop offset="1" stop-color="${c.f1}"/></linearGradient><linearGradient id="c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".38"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/></linearGradient><pattern id="p" width="20" height="10" patternUnits="userSpaceOnUse"><path d="${c.pd}" fill="none" stroke="#000" stroke-opacity=".16"/></pattern></defs><rect width="300" height="300" fill="url(#a)"/><rect x="90" y="108" width="120" height="70" fill="${c.far}"/><polygon points="0,0 96,108 96,176 0,300" fill="${c.wl}"/><polygon points="300,0 204,108 204,176 300,300" fill="${c.wr}"/><polygon points="0,300 96,176 204,176 300,300" fill="url(#b)"/><polygon points="0,0 96,108 96,176 0,300" fill="url(#p)"/><polygon points="300,0 204,108 204,176 300,300" fill="url(#p)"/>${c.ex}<rect width="300" height="300" fill="url(#c)"/></svg>`;
   }
-  let xhBg = { k: '', v: 0 };
+  /* ---- v10: REAL STEAM DATA for the map backdrops. Steam has no "map picture" endpoint, so the screenshots attached to the
+     Dust II / Nuke / Cache entries on the Steam Workshop are fetched with the Steam Web API (IPublishedFileService/QueryFiles, through
+     the bridge, which adds the Steam key) and used as the backdrop. Cached 12 h in this browser; the built-in scene is shown first and
+     stays as the fallback when Steam returns nothing. ---- */
+  const XH_STEAM = { dust: { q: ['de_dust2', 'dust2'], re: /dust\s*(?:ii|2)|dust2/i }, nuke: { q: ['de_nuke', 'nuke'], re: /nuke/i }, cache: { q: ['de_cache', 'cache'], re: /cache/i } };
+  const XH_IMG_OK = /^https:\/\/(?:[a-z0-9-]+\.)*(?:steamusercontent\.com|steamstatic\.com|akamaihd\.net)\/[^\s"'()<>\\]+$/i, XH_LS = 'mway_xhmaps_v10';
+  const xhSteamMem = {};
+  function xhLsGet() { try { return JSON.parse(localStorage.getItem(XH_LS) || '{}') || {}; } catch (e) { return {}; } }
+  function xhSteamLoad(k) {
+    const cur = xhSteamMem[k];
+    if (cur && (cur.p || Date.now() - cur.t < (cur.imgs.length ? 43200e3 : 600e3))) return cur.p || Promise.resolve(cur.imgs);
+    const ls = xhLsGet()[k];
+    if (ls && Array.isArray(ls.imgs) && ls.imgs.length && Date.now() - ls.t < 43200e3) { xhSteamMem[k] = { t: ls.t, imgs: ls.imgs.filter(u => XH_IMG_OK.test(u)), p: null }; return Promise.resolve(xhSteamMem[k].imgs); }
+    const rec = xhSteamMem[k] = { t: Date.now(), imgs: [], p: null }, cfg = XH_STEAM[k];
+    rec.p = (async () => {
+      const imgs = [];
+      if (!cfg || !hasSteamKey()) return imgs;
+      for (const q of cfg.q) {
+        if (imgs.length >= 5) break;
+        try {
+          const j = await steamApi('IPublishedFileService/QueryFiles/v1', { appid: 730, creator_appid: 730, search_text: q, query_type: 12, page: 1, numperpage: 12, return_previews: 'true', filetype: 0 }, { ttl: 3600000 });
+          (((j || {}).response || {}).publishedfiledetails || []).forEach(f => {
+            if (!f || !cfg.re.test(String(f.title || ''))) return;                       // only entries that really are this map
+            const urls = (Array.isArray(f.previews) ? f.previews : []).filter(p => p && p.url && (p.preview_type == null || +p.preview_type === 0)).map(p => String(p.url));
+            if (f.preview_url) urls.unshift(String(f.preview_url));
+            urls.forEach(u => { if (XH_IMG_OK.test(u) && !imgs.includes(u) && imgs.length < 6) imgs.push(u); });
+          });
+        } catch (e) { diag('warn', 'app', 'map backdrop: Steam Workshop query "' + q + '" failed (' + (e.message || e.code) + ')'); }
+      }
+      diag(imgs.length ? 'info' : 'warn', 'app', 'map backdrop ' + k + ': ' + imgs.length + ' Steam Workshop screenshot(s)');
+      return imgs;
+    })().then(r => {
+      rec.imgs = r; rec.t = Date.now(); rec.p = null;
+      if (r.length) { try { const o = xhLsGet(); o[k] = { t: rec.t, imgs: r }; localStorage.setItem(XH_LS, JSON.stringify(o)); } catch (e) { /* storage full or blocked */ } }
+      return r;
+    });
+    return rec.p;
+  }
+  const xhViews = k => Math.max(2, (xhSteamMem[k] && xhSteamMem[k].imgs.length) || 0);
+  let xhBg = { k: 'dust', v: 0 };   // v10: Dust is option one and the default
   function xhApplyBg() {
     const cv = $('#xhCv'), lbl = $('#xhBgLbl'), k = xhBg.k, v = xhBg.v;
     $$('#xhBgs button').forEach(b => { const on = k ? b.dataset.map === k : !!b.dataset.bg; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
-    if (!k) { cv.style.background = '#161b24'; if (lbl) lbl.textContent = ''; return; }
-    cv.style.background = '#161b24 url("data:image/svg+xml;utf8,' + encodeURIComponent(xhScene(k, v)) + '") center / cover no-repeat';
-    const m = XMAPS[k]; if (lbl) lbl.textContent = `${m[0]} - ${m[1][v]} (click ${k.toUpperCase()} again for ${m[1][1 - v]})`;
-    const ph = (XH_MAP_PHOTOS[k] || [])[v];
-    if (ph && /^(https:\/\/|[\w./-]+$)/.test(ph)) { const im = new Image(); im.onload = () => { if (xhBg.k === k && xhBg.v === v) cv.style.background = `#161b24 url("${ph}") center / cover no-repeat`; }; im.src = ph; }
+    if (!k) { cv.classList.remove('xh-steam'); cv.style.background = '#161b24'; if (lbl) lbl.textContent = ''; return; }
+    cv.classList.remove('xh-steam');
+    cv.style.background = '#161b24 url("data:image/svg+xml;utf8,' + encodeURIComponent(xhScene(k, v % 2)) + '") center / cover no-repeat';   // instant built-in scene
+    const m = XMAPS[k], say = t => { if (lbl) lbl.textContent = t; };
+    say(`${m[0]} - ${m[1][v % 2]} (click ${k.toUpperCase()} again to switch view)`);
+    const localPhoto = () => {
+      const ph = (XH_MAP_PHOTOS[k] || [])[v % 2];
+      if (ph && /^(https:\/\/|[\w./-]+$)/.test(ph)) { const im = new Image(); im.onload = () => { if (xhBg.k === k && xhBg.v === v) cv.style.background = `#161b24 url("${ph}") center / cover no-repeat`; }; im.src = ph; }
+    };
+    xhSteamLoad(k).then(imgs => {
+      if (xhBg.k !== k || xhBg.v !== v) return;
+      if (!imgs.length) return localPhoto();
+      const i = v % imgs.length, u = imgs[i], im = new Image();
+      im.onload = () => { if (xhBg.k !== k || xhBg.v !== v) return; cv.classList.add('xh-steam'); cv.style.background = `#161b24 url("${u}") center / cover no-repeat`; say(`${m[0]} - Steam Workshop screenshot ${i + 1} of ${imgs.length} (click ${k.toUpperCase()} again for the next view)`); };
+      im.onerror = localPhoto;
+      im.src = u;
+    });
   }
   function xhImport() {
     const msg = $('#xhImpMsg'), r = xhDecode($('#xhImp').value);
@@ -2033,10 +2084,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#xhBgs').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.bg) xhBg = { k: '', v: 0 };
-      else if (b.dataset.map) xhBg = { k: b.dataset.map, v: xhBg.k === b.dataset.map ? 1 - xhBg.v : 0 };   // same button again = second view of that map
+      else if (b.dataset.map) xhBg = { k: b.dataset.map, v: xhBg.k === b.dataset.map ? (xhBg.v + 1) % xhViews(b.dataset.map) : 0 };   // same button again = next view of that map
       else return;
       xhApplyBg();
     });
+    xhApplyBg();   // v10: show the default (Dust) backdrop on load
     let impT = 0;
     $('#xhImpGo').addEventListener('click', () => { if (!$('#xhImp').value.trim()) { const m = $('#xhImpMsg'); m.classList.add('bad'); m.textContent = 'Paste a crosshair share code first.'; return; } if (xhImport()) toast('Crosshair imported.'); });
     $('#xhImp').addEventListener('keydown', e => { if (e.key === 'Enter') $('#xhImpGo').click(); });
