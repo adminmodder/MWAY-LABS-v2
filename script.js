@@ -2380,32 +2380,186 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   };
   const lkIcon = (k, href, label) => `<a class="lk-ico ${k}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(label)}" aria-label="${esc(label)}">${LK_ICO[k]}</a>`;
 
-  /* ---- v6: Top 5 teammates (Leetify match history; falls back to recent_teammates counts) ---- */
+  /* ---- v9: crosshair box, K/D + aim gauges, last-5 form, banned friends (CS2 player lookup) ---- */
+  const XH_RE = /CSGO(?:-[A-Za-z0-9]{5}){5}/, XH_ABC = 'ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789';
+  function xhFind(o, depth) {   // look for a CS2 crosshair share code anywhere inside a (Leetify) object
+    depth = depth || 0;
+    if (o == null || depth > 5) return '';
+    if (typeof o === 'string') { const m = XH_RE.exec(o); return m ? m[0] : ''; }
+    if (typeof o !== 'object') return '';
+    for (const k of Object.keys(o)) { const r = xhFind(o[k], depth + 1); if (r) return r; }
+    return '';
+  }
+  function xhDecode(code) {   // best-effort decode of the share code, only used to DRAW the small preview; the copied code is always the original
+    try {
+      const s2 = String(code).replace(/^CSGO/, '').replace(/-/g, '');
+      let n = 0n;
+      for (let i = s2.length - 1; i >= 0; i--) { const x = XH_ABC.indexOf(s2[i]); if (x < 0) return null; n = n * 57n + BigInt(x); }
+      const b = []; for (let i = 0; i < 18; i++) { b.unshift(Number(n & 255n)); n >>= 8n; }
+      if (b.slice(1).reduce((a, c) => a + c, 0) % 256 !== b[0]) return null;
+      const i8 = x => x > 127 ? x - 256 : x, ci = b[10] & 7, pal = [[250, 42, 42], [50, 250, 50], [250, 250, 50], [50, 50, 250], [50, 250, 250]];
+      const len = ((b[15] << 8) | b[14]) / 10, th = (((b[13] & 15) << 8) | b[12]) / 10, gap = i8(b[2]) / 10, al = b[7] / 255;
+      return { rgb: ci < 5 ? pal[ci] : [b[4], b[5], b[6]], a: al < 0.25 ? 1 : al, gap: gap >= -10 && gap <= 10 ? gap : -2, len: len > 0 && len <= 20 ? len : 5, thick: th > 0 && th <= 6 ? th : 1, dot: !!(b[13] & 16), outline: !!(b[10] & 8) };
+    } catch (e) { return null; }
+  }
+  function xhSvg(x) {
+    x = x || { rgb: [80, 250, 80], a: 1, gap: -2, len: 5, thick: 1, dot: false, outline: false };
+    const T = Math.max(1.3, x.thick * 1.5), L = Math.min(13, Math.max(2.5, x.len * 1.5)), G = Math.max(1, 3 + x.gap * 1.5), h = T / 2;
+    const r = (X, Y, W, H) => `<rect x="${X.toFixed(1)}" y="${Y.toFixed(1)}" width="${W.toFixed(1)}" height="${H.toFixed(1)}"/>`;
+    return `<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g fill="rgb(${x.rgb.join(',')})" opacity="${x.a.toFixed(2)}" stroke="${x.outline ? '#000' : 'none'}" stroke-width="${x.outline ? 0.8 : 0}">${r(20 - G - L, 20 - h, L, T)}${r(20 + G, 20 - h, L, T)}${r(20 - h, 20 - G - L, T, L)}${r(20 - h, 20 + G, T, L)}${x.dot ? r(20 - h, 20 - h, T, T) : ''}</g></svg>`;
+  }
+  const mOwn = (m, id) => Array.isArray(m && m.stats) ? (m.stats.find(x => x && String(x.steam64_id) === id) || null) : (m || null);
+  function mOutcome(m, id) {   // 'win' | 'loss' | 'tie' | '' for one Leetify match (any source: premier, competitive, faceit ...)
+    if (!m) return '';
+    const me = mOwn(m, id) || {}, r = String(m.outcome || me.outcome || m.result || '').toLowerCase();
+    if (/^(win|won|victory)/.test(r)) return 'win';
+    if (/^(los|defeat)/.test(r)) return 'loss';
+    if (/^(tie|draw)/.test(r)) return 'tie';
+    if (Array.isArray(m.team_scores) && me.initial_team_number != null) {
+      const mine = m.team_scores.find(t => Number(t.team_number) === Number(me.initial_team_number)), other = m.team_scores.find(t => Number(t.team_number) !== Number(me.initial_team_number));
+      if (mine && other) return mine.score > other.score ? 'win' : mine.score < other.score ? 'loss' : 'tie';
+    }
+    return '';
+  }
+  async function loadMatches(v, d) {   // one shared Leetify match-history load per lookup (teammates, K/D, form and crosshair all use it)
+    if (v._mp) return v._mp;
+    v._mp = (async () => {
+      const lf = d.lf || {}, base = Array.isArray(lf.recent_matches) ? lf.recent_matches : [];
+      let full = base.some(m => m && Array.isArray(m.stats) && m.stats.length) ? base : null;
+      if (!full) {   // /v3/profile only carries a per-match summary; the lobby (stats[] of all 10 players) comes from /v3/profile/matches
+        const k = (settings.steamCfg.leetifyKey || '').trim(), headers = k ? { Authorization: 'Bearer ' + k, _leetify_key: k } : undefined;
+        try {
+          const r = await proxyReq('https://api-public.cs-prod.leetify.com/v3/profile/matches?steam64_id=' + v.id, { json: true, direct: true, headers, ttl: 300000, timeout: 9000, total: 14000 });
+          const j = r.json;
+          full = Array.isArray(j) ? j : j && (Array.isArray(j.matches) ? j.matches : Array.isArray(j.data) ? j.data : Array.isArray(j.results) ? j.results : null);
+          diag('info', 'app', 'matches: ' + (Array.isArray(full) ? full.length : 0) + ' match(es) with lobby data from Leetify');
+        } catch (e) { diag('warn', 'app', 'matches: match history unavailable (' + (e.message || e.code) + ')'); }
+      }
+      return { full: Array.isArray(full) && full.length ? full : null, base };
+    })();
+    return v._mp;
+  }
+  function kdCalc(list, id) {
+    let k = 0, de = 0, n = 0, sum = 0, nr = 0;
+    list.forEach(m => {
+      const o = mOwn(m, id) || {}, kk = Number(o.total_kills != null ? o.total_kills : o.kills), dd = Number(o.total_deaths != null ? o.total_deaths : o.deaths);
+      if (Number.isFinite(kk) && Number.isFinite(dd) && (kk || dd)) { k += kk; de += dd; n++; }
+      else { const q = Number(o.kd_ratio); if (Number.isFinite(q) && q > 0) { sum += q; nr++; } }
+    });
+    if (n) return { kd: de ? k / de : k, k, d: de, n };
+    if (nr) return { kd: sum / nr, n: nr, avg: true };
+    return null;
+  }
+  async function statsStart(v, d) {
+    v.xh = { state: 'loading' }; v.form = { state: 'loading' }; v.perf = { state: 'loading' }; updPerf();
+    if (d.lfState !== 'ok') { v.xh = { state: 'na' }; v.form = { state: 'na', list: [] }; v.perf = { state: 'na' }; updPerf(); return; }
+    let mp; try { mp = await loadMatches(v, d); } catch (e) { mp = { full: null, base: (d.lf && d.lf.recent_matches) || [] }; }
+    if (lkv !== v) return;
+    const src = (mp.full || mp.base || []).filter(m => m && typeof m === 'object');
+    const ts = m => { const t = Date.parse(m.finished_at || m.started_at || ''); return Number.isFinite(t) ? t : 0; };
+    const sorted = src.slice().sort((a, b) => ts(b) - ts(a));
+    v.form = { state: 'ok', list: sorted.map(m => mOutcome(m, v.id)).filter(Boolean).slice(0, 5) };
+    const rest = Object.assign({}, d.lf); delete rest.recent_matches; delete rest.recent_teammates;
+    let code = xhFind(rest);
+    for (let i = 0; !code && i < sorted.length; i++) { const o = mOwn(sorted[i], v.id); if (o) code = xhFind(o); }
+    diag('info', 'app', 'crosshair: ' + (code ? 'share code found in the Leetify data' : 'no share code in the Leetify data for this player'));
+    v.xh = code ? { state: 'ok', code, dec: xhDecode(code) } : { state: 'na' };
+    const aim = Number(d.lf && d.lf.rating && d.lf.rating.aim);
+    v.perf = { state: 'ok', kd: kdCalc(sorted, v.id), aim: Number.isFinite(aim) ? Math.max(0, Math.min(100, aim)) : null };
+    updPerf();
+  }
+  function gaugeHTML(cls, label, text, pct, color, info) {
+    return `<div class="lk-tile lk-gauge ${cls}"><span class="flabel">${label}</span><div class="lk-g-row"><div class="lk-ring" style="--c:${color}"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="rg-dec" cx="60" cy="60" r="57"/><circle class="rg-track" cx="60" cy="60" r="48"/><circle class="rg-val" cx="60" cy="60" r="48" pathLength="100" style="--p:${pct.toFixed(1)}"/></svg><b>${text}</b></div><div class="lk-g-info">${info}</div></div></div>`;
+  }
+  function updPerf() {
+    const v = lkv; if (!v) return;
+    const box = $('#lkPerf'), p = v.perf;
+    if (box && p) {
+      if (p.state === 'loading') box.innerHTML = `<div class="lk-tile lk-gauge"><p class="muted">${invSpin} Loading K/D and aim rating&hellip;</p></div>`;
+      else if (p.state !== 'ok') box.innerHTML = '<div class="lk-tile lk-gauge"><span class="flabel">K/D</span><div class="lk-na lk-na-box">No Data</div></div><div class="lk-tile lk-gauge"><span class="flabel">Aim rating</span><div class="lk-na lk-na-box">No Data</div></div>';
+      else {
+        const kd = p.kd, kc = !kd ? '#8793a5' : kd.kd >= 1.2 ? '#4fb286' : kd.kd >= 1 ? '#5b8def' : kd.kd >= 0.85 ? '#d1a455' : '#d1556a';
+        const kdInfo = kd ? `<span class="lk-g-t">Kill / Death ratio</span><span class="muted">${kd.avg ? 'average of ' : ''}${kd.n} recent match${kd.n > 1 ? 'es' : ''}</span>${kd.k != null ? `<span class="lk-kdbar" title="${kd.k} kills / ${kd.d} deaths"><i style="width:${Math.round(kd.k / Math.max(1, kd.k + kd.d) * 100)}%"></i></span><span class="lk-g-kd"><em>${kd.k.toLocaleString('en-US')}</em> kills &middot; <u>${kd.d.toLocaleString('en-US')}</u> deaths</span>` : ''}` : '<span class="muted">Kills and deaths are not in the match data Leetify returned.</span>';
+        const aim = p.aim, ac = aim == null ? '#8793a5' : aim >= 75 ? '#4fb286' : aim >= 60 ? '#5b8def' : aim >= 45 ? '#d1a455' : '#d1556a';
+        const tier = aim == null ? '' : aim >= 85 ? 'Elite' : aim >= 70 ? 'Strong' : aim >= 55 ? 'Solid' : aim >= 40 ? 'Average' : 'Developing';
+        box.innerHTML = gaugeHTML('lk-kd', 'K/D ratio', kd ? kd.kd.toFixed(2) : '--', kd ? Math.min(100, kd.kd / 2 * 100) : 0, kc, kdInfo)
+          + gaugeHTML('lk-aim', 'Aim rating', aim == null ? '--' : String(Math.round(aim)), aim == null ? 0 : aim, ac, aim == null ? '<span class="muted">Leetify has no aim rating for this player.</span>' : `<span class="lk-g-t">${tier}</span><span class="muted">overall aim score out of 100</span><span class="lk-kdbar aim"><i style="width:${aim.toFixed(0)}%"></i></span>`);
+      }
+    }
+    const fm = $('#lkForm');
+    if (fm && v.form) {
+      const L = { win: ['W', 'w'], loss: ['L', 'l'], tie: ['T', 't'] }, f = v.form;
+      fm.innerHTML = f.state === 'loading' ? '<span class="lk-fm-l">Last 5</span><span class="lk-fm-r muted">&hellip;</span>'
+        : f.list && f.list.length ? `<span class="lk-fm-l">Last 5</span><span class="lk-fm-r">${f.list.map(o => `<b class="${L[o][1]}">${L[o][0]}</b>`).join('<s>-</s>')}</span>`
+        : '<span class="lk-fm-l">Last 5</span><span class="lk-fm-r muted">n/a</span>';
+      fm.title = 'Most recent match first (premier, competitive and faceit combined)';
+    }
+    const xb = $('#lkXh');
+    if (xb && v.xh) {
+      const x = v.xh;
+      xb.className = 'lk-xh' + (x.state === 'ok' ? '' : x.state === 'loading' ? ' loading' : ' na');
+      xb.disabled = x.state !== 'ok'; xb.innerHTML = xhSvg(x.state === 'ok' ? x.dec : null);
+      if (x.state === 'ok') { xb.dataset.xh = x.code; xb.title = 'Click to copy this crosshair code, then import it in CS2 (Settings > Game > Crosshair > Import)'; xb.setAttribute('aria-label', 'Copy crosshair code'); }
+      else { delete xb.dataset.xh; xb.title = x.state === 'loading' ? 'Loading crosshair...' : 'No crosshair code available for this player'; }
+    }
+  }
+  /* banned friends: friend list (needs a public list + Steam key) -> GetPlayerBans in chunks of 100 */
+  async function frStart(v, d) {
+    v.fr = { state: 'loading' }; updFr();
+    if (!hasSteamKey()) { v.fr = { state: 'nokey' }; updFr(); return; }
+    let ids = [];
+    try {
+      const r = await steamApi('ISteamUser/GetFriendList/v1', { steamid: v.id, relationship: 'friend' }, { ttl: 300000 });
+      ids = (((r || {}).friendslist || {}).friends || []).map(f => String(f.steamid)).filter(x => /^\d{17}$/.test(x));
+    } catch (e) { if (lkv !== v) return; v.fr = { state: 'private' }; updFr(); return; }
+    if (lkv !== v) return;
+    if (!ids.length) { v.fr = { state: 'private' }; updFr(); return; }
+    const capped = ids.slice(0, 1500), chunks = []; for (let i = 0; i < capped.length; i += 100) chunks.push(capped.slice(i, i + 100));
+    const acc = { checked: 0, total: ids.length, any: 0, vac: 0, game: 0, trade: 0, comm: 0, failed: 0 };
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const c = chunks[next++];
+        try {
+          const j = await steamApi('ISteamUser/GetPlayerBans/v1', { steamids: c.join(',') }, { ttl: 600000 });
+          ((j || {}).players || []).forEach(p => {
+            acc.checked++;
+            const vac = !!(p.VACBanned || p.NumberOfVACBans), game = (p.NumberOfGameBans || 0) > 0, trade = !!p.EconomyBan && p.EconomyBan !== 'none', comm = !!p.CommunityBanned;
+            if (vac) acc.vac++; if (game) acc.game++; if (trade) acc.trade++; if (comm) acc.comm++;
+            if (vac || game || trade || comm) acc.any++;
+          });
+        } catch (e) { acc.failed += c.length; }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (lkv !== v) return;
+    v.fr = acc.checked ? Object.assign({ state: 'ok' }, acc) : { state: 'err' };
+    diag('info', 'app', 'friends: ' + acc.checked + ' of ' + ids.length + ' checked, ' + acc.any + ' with bans');
+    updFr();
+  }
+  function updFr() {
+    const box = $('#lkFr'), f = lkv && lkv.fr; if (!box || !f) return;
+    if (f.state === 'loading') { box.innerHTML = `<p class="muted">${invSpin} Checking friends for bans&hellip;</p>`; return; }
+    if (f.state === 'nokey') { box.innerHTML = '<p class="muted">A Steam Web API key is needed to read the friends list.</p>'; return; }
+    if (f.state === 'private') { box.innerHTML = '<p class="muted">This player\'s friends list is private (or empty), so friends cannot be checked.</p>'; return; }
+    if (f.state === 'err') { box.innerHTML = '<p class="muted">Friend bans could not be loaded right now.</p>'; return; }
+    const chips = [['VAC', f.vac], ['Game ban', f.game], ['Trade ban', f.trade], ['Community', f.comm]].filter(x => x[1] > 0).map(x => `<span class="fr-chip"><b>${x[1]}</b>${x[0]}</span>`).join('');
+    box.innerHTML = `<div class="fr-card ${f.any ? 'bad' : 'clean'}"><div class="fr-num"><b>${f.any}</b></div><div class="fr-b"><span class="fr-t">${f.any ? (f.any === 1 ? 'friend with a ban' : 'friends with bans') : 'No banned friends'}</span><span class="muted">${f.any ? `out of ${f.checked.toLocaleString('en-US')} friends checked` : `${f.checked.toLocaleString('en-US')} friends checked, none flagged`}${f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : ''}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div></div>`;
+  }
+
+  /* ---- v6: Top 6 teammates (Leetify match history; falls back to recent_teammates counts) ---- */
   async function tmStart(v, d) {
     const lf = d.lf || {};
     v.tm = { state: 'loading', list: [] }; updTm();
     if (d.lfState !== 'ok') { v.tm = { state: 'none', list: [] }; updTm(); return; }
     try {
-      let matches = Array.isArray(lf.recent_matches) && lf.recent_matches.some(m => m && Array.isArray(m.stats) && m.stats.length) ? lf.recent_matches : null;
-      if (!matches) {   // v7: /v3/profile only carries a per-match summary of the player; the lobby (stats[] of all 10 players) comes from /v3/profile/matches
-        const k = (settings.steamCfg.leetifyKey || '').trim(), headers = k ? { Authorization: 'Bearer ' + k, _leetify_key: k } : undefined;
-        try {
-          const r = await proxyReq('https://api-public.cs-prod.leetify.com/v3/profile/matches?steam64_id=' + v.id, { json: true, direct: true, headers, ttl: 300000, timeout: 9000, total: 14000 });
-          const j = r.json;
-          matches = Array.isArray(j) ? j : j && (Array.isArray(j.matches) ? j.matches : Array.isArray(j.data) ? j.data : Array.isArray(j.results) ? j.results : null);
-          diag('info', 'app', 'teammates: ' + (Array.isArray(matches) ? matches.length : 0) + ' match(es) with lobby data from Leetify');
-        } catch (e) { diag('warn', 'app', 'teammates: match history unavailable (' + (e.message || e.code) + '), using recent_teammates counts'); }
-      }
+      const matches = (await loadMatches(v, d)).full;   // v9: shared with K/D, form and crosshair
       if (lkv !== v) return;
       const agg = {};
       (Array.isArray(matches) ? matches : []).forEach(m => {
         const st = Array.isArray(m && m.stats) ? m.stats : [], me = st.find(x => x && String(x.steam64_id) === v.id);
         if (!me || me.initial_team_number == null) return;
-        const team = Number(me.initial_team_number); let res = String(m.outcome || me.outcome || '').toLowerCase();
-        if (!res && Array.isArray(m.team_scores)) {
-          const mine = m.team_scores.find(t => Number(t.team_number) === team), other = m.team_scores.find(t => Number(t.team_number) !== team);
-          if (mine && other) res = mine.score > other.score ? 'win' : mine.score < other.score ? 'loss' : 'tie';
-        }
+        const team = Number(me.initial_team_number), res = mOutcome(m, v.id);   // v9: tolerant outcome (win/victory/loss/defeat, or the team scores)
         st.forEach(x => {
           const sid = String((x && x.steam64_id) || ''); if (!sid || sid === v.id || Number(x.initial_team_number) !== team) return;
           const a = agg[sid] || (agg[sid] = { id: sid, name: x.name || '', n: 0, w: 0, l: 0, k: 0 });
@@ -2413,14 +2567,15 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
           if (!a.name && x.name) a.name = x.name;
         });
       });
-      let list = Object.values(agg).filter(t => t.n >= 2), counts = false;
+      const allTm = Object.values(agg).sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0));
+      let list = allTm.filter(t => t.n >= 2).concat(allTm.filter(t => t.n < 2)), counts = false;   // v9: repeat teammates first, then fill up to 6
       if (!list.length) {   // v7: the real Leetify field is recent_matches_count (the old code read recent_matches, which does not exist -> always 0 -> always "no repeat teammates")
         list = (Array.isArray(lf.recent_teammates) ? lf.recent_teammates : []).filter(t => t && t.steam64_id)
-          .map(t => ({ id: String(t.steam64_id), name: '', n: Number(t.recent_matches_count != null ? t.recent_matches_count : t.recent_matches != null ? t.recent_matches : t.matches_count != null ? t.matches_count : t.count) || 0, w: 0, l: 0, k: 0 }))
+          .map(t => ({ id: String(t.steam64_id), name: '', n: Number(t.recent_matches_count != null ? t.recent_matches_count : t.recent_matches != null ? t.recent_matches : t.matches_count != null ? t.matches_count : t.count) || 0, w: Number(t.wins) || 0, l: Number(t.losses) || 0, k: (Number(t.wins) || 0) + (Number(t.losses) || 0) }))
           .filter(t => t.n >= 2);
-        counts = list.length > 0;
+        counts = list.length > 0 && !list.some(t => t.k);
       }
-      list = list.sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0)).slice(0, 5);
+      list = list.sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0)).slice(0, 6);
       if (list.length && hasSteamKey()) {                      // avatars + persona names, one request
         try {
           const sm = await steamApi('ISteamUser/GetPlayerSummaries/v2', { steamids: list.map(t => t.id).join(',') });
@@ -2437,12 +2592,12 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (t.state === 'loading') { box.innerHTML = `<p class="muted">${invSpin} Loading teammates&hellip;</p>`; return; }
     if (t.state === 'none') { box.innerHTML = '<p class="muted">Teammate stats need Leetify match data, which is not available for this player.</p>'; return; }
     if (t.state === 'err') { box.innerHTML = '<p class="muted">Teammates could not be loaded right now.</p>'; return; }
-    if (t.state === 'empty') { box.innerHTML = '<p class="muted">No repeat teammates (2+ matches together) in this player\'s recent Leetify matches.</p>'; return; }
+    if (t.state === 'empty') { box.innerHTML = '<p class="muted">No teammates found in this player\'s recent Leetify matches.</p>'; return; }
     box.innerHTML = `<div class="tm-list">${t.list.map((m, i) => {
       const wr = m.k ? Math.round(m.w / m.k * 100) : null, nm = m.name || ('Player ' + m.id.slice(-6)), ini = esc((nm[0] || '?').toUpperCase());
       return `<button type="button" class="tm" data-tm-look="${esc(m.id)}" title="Look up ${esc(nm)}">
         <span class="tm-av">${m.avatar && /^https:\/\//i.test(m.avatar) ? `<img src="${esc(m.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-ifb="1">` : `<span class="avatar">${ini}</span>`}</span>
-        <span class="tm-b"><span class="tm-n">${esc(nm)}</span><span class="tm-s"><span>${m.n} matches together</span><span>${wr == null ? 'win rate n/a' : wr + '% win rate (' + m.w + 'W - ' + m.l + 'L)'}</span></span>${wr == null ? '' : `<span class="tm-bar"><i style="width:${wr}%"></i></span>`}</span>
+        <span class="tm-b"><span class="tm-n">${esc(nm)}</span><span class="tm-s"><span>${m.n} matches together</span><span>${wr == null ? 'WR n/a' : 'WR ' + wr + '% (' + m.w + 'W - ' + m.l + 'L)'}</span></span>${wr == null ? '' : `<span class="tm-bar"><i style="width:${wr}%"></i></span>`}</span>
         <span class="tm-rank">#${i + 1}</span></button>`;
     }).join('')}</div><p class="muted">Counted from the recent matches Leetify returns${t.counts ? ' (match details were unavailable, so win rates are not shown)' : ''}. Click a teammate to look them up.</p>`;
   }
@@ -3163,10 +3318,10 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const tm = topMaps(lf), fcNick = lf.faceit_nickname || rk.faceit_nickname || '';
     const faceitUrl = (d.fc && d.fc.url) || (fcNick ? `https://www.faceit.com/en/players/${encodeURIComponent(fcNick)}` : `https://faceitfinder.com/profile/${d.id}`);
     const rec = mapRecords(lf);
-    const links = `<div class="lk-links">${[lkIcon('steam', url, 'Steam Profile'),
+    const links = `<div class="lk-links"><button type="button" id="lkXh" class="lk-xh loading" disabled aria-label="Player crosshair"></button>${[lkIcon('steam', url, 'Steam Profile'),
       rk.faceit || fcNick ? lkIcon('faceit', faceitUrl, 'Faceit Profile') : '',
       lkIcon('leetify', 'https://leetify.com/app/profile/' + d.id, 'Leetify Profile'),
-      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}</div>`;
+      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div></div>`;
     /* v7: the Faceit and Premier boxes (plus the Trust Factor beside them) are ALWAYS rendered, so the layout never collapses
        when a player has no rank, no Faceit account or no Leetify data: the empty boxes say "Unranked" instead. */
     const hc = d.hltv >= 1.1 ? '#4fb286' : d.hltv >= 1 ? '#5b8def' : d.hltv >= 0.9 ? '#d1a455' : '#d1556a';
@@ -3181,6 +3336,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
           ${comp ? `<div class="lk-rank main">${rankIcon(comp.rank, 120)}<span>${esc(mapName(comp.map_name))}</span>${wrHTML(rec[comp.map_name])}</div>` : '<div class="lk-na lk-na-box">Unranked</div>'}
           ${tm.length ? `<div class="lk-maps-wrap"><span class="flabel">Top ${tm.length} played map${tm.length > 1 ? 's' : ''}</span><div class="lk-maps">${tm.map(m => `<div class="lk-rank" title="${esc(COMP[m.rank] || '')}">${rankIcon(m.rank, 76)}<span>${esc(mapName(m.map))}</span>${wrHTML(rec[m.map])}</div>`).join('')}</div></div>` : ''}
         </div></div></div>
+      <div id="lkPerf" class="lk-perf"></div>
       ${TF_NOTE}
       ${d.lfState === 'ok' ? WR_NOTE
         : d.lfState === 'none' ? '<p class="muted">No Leetify profile exists for this player (or it is set to private), so CS2 rank data is unavailable.</p>'
@@ -3199,7 +3355,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       <span class="flabel mt-s">CS2 player data</span>${cs2}
       ${d.lfState === 'ok' ? '<p class="muted">CS2 rank data provided by <a href="https://leetify.com" target="_blank" rel="noopener">Leetify</a>.</p>' : ''}
       ${d.fc && d.fc.state === 'ok' ? '<p class="muted">FACEIT level and ELO provided by the <a href="https://docs.faceit.com/docs/data-api/data" target="_blank" rel="noopener">FACEIT Data API</a>.</p>' : ''}
-      <span class="flabel mt-s">Top 5 Teammates</span><div id="lkTm" class="lk-tm"></div>
+      <span class="flabel mt-s">Top 6 Teammates</span><div id="lkTm" class="lk-tm"></div>
+      <span class="flabel mt-s">Banned friends</span><div id="lkFr" class="lk-fr"></div>
       <span class="flabel mt-s">Inventory value</span><div id="lkInv" class="lk-inv"></div>
       <div id="lkTabs" class="lk-tabs" role="tablist"></div><div id="lkTabBody" class="lk-tabbody hidden"></div>
     </div>`;
@@ -3214,7 +3371,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (d.pub === false) {
       v.inv = { state: 'private', items: [] }; v.com = { state: 'closed', list: [] }; updInv(); updTabs();
     } else { invStart(v); comStart(v); }     // v6: inventory, comments and teammates are separate async jobs: none waits for another
-    tmStart(v, d);
+    tmStart(v, d); statsStart(v, d); frStart(v, d);   // v9
   }
 
   async function lkSearch(force) {
@@ -3289,6 +3446,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     out.addEventListener('click', async e => {
       const t = e.target, cp = t.closest('[data-cp]');
       if (cp) return toast(await copyText(cp.dataset.cp) ? 'Copied.' : 'Copy failed.');
+      const xhb = t.closest('[data-xh]'); if (xhb) return toast(await copyText(xhb.dataset.xh) ? 'Crosshair code copied. In CS2: Settings > Game > Crosshair > Import.' : 'Copy failed.');   // v9
       if (t.closest('[data-cp-all]') && lkv) return toast(await copyText((lkv.ids || []).map(([l, x]) => l + ': ' + x).join('\n')) ? 'All IDs copied.' : 'Copy failed.');
       if (t.closest('[data-com-more]') && lkv) return comMore(lkv);
       if (t.closest('[data-com-retry]') && lkv) return comStart(lkv);
