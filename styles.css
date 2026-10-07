@@ -682,3 +682,24 @@ input[type=range]{padding:0;border:0;accent-color:var(--accent);background:none}
 .fr-chips{display:flex;gap:6px;flex-wrap:wrap}
 .fr-chip{display:inline-flex;align-items:center;gap:6px;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#fff;background:#a62d42;border:1px solid var(--danger);padding:3px 8px}.fr-chip b{font-size:12px}
 .xh-cv.xh-steam{image-rendering:auto}
+
+
+/* ===== v10: teammates grid (6 = 3 x 2), banned-friends box beside "Last 5", clickable empty crosshair box ===== */
+.tm-list{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:980px){.tm-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.tm-list{grid-template-columns:1fr}}
+.lk-fr{display:inline-flex;max-width:100%}
+.fr-mini{position:relative;display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-height:42px;box-sizing:border-box;max-width:100%;padding:4px 14px 4px 16px;border:1px solid var(--line);background:var(--panel);border-radius:2px;font-family:var(--mono);overflow:hidden}
+.fr-mini::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line)}
+.fr-mini.clean::before{background:var(--ok)}
+.fr-mini.bad{border-color:rgba(209,85,106,.55);background:linear-gradient(90deg,rgba(209,85,106,.14),var(--panel) 70%)}
+.fr-mini.bad::before{background:var(--danger);box-shadow:0 0 10px var(--danger)}
+.fr-mini-l{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);border-right:1px solid var(--line);padding-right:10px}
+.fr-mini-n{font-size:18px;font-weight:800;line-height:1;color:var(--ok)}
+.fr-mini.bad .fr-mini-n{color:#ff6b83;text-shadow:0 0 12px rgba(209,85,106,.6)}
+.fr-mini-s{font-size:11px;color:var(--muted)}
+.fr-mini .fr-chips{gap:4px}.fr-mini .fr-chip{padding:2px 6px;font-size:9px}.fr-mini .fr-chip b{font-size:11px}
+.lk-xh.set{opacity:.75;cursor:pointer;border-style:dashed}
+.lk-xh.set:hover,.lk-xh.set:focus-visible{opacity:1;border-color:var(--accent)}
+.fc-img{object-fit:contain}
+#imSel{max-width:100%}

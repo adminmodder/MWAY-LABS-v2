@@ -42,7 +42,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     tabs: { tools: true, bots: true, roadmap: true, tab3: true, phone: true },
     featuredVisible: true,
     roadmapVisible: true,
-    navLabels: { tools: 'TOOLS', bots: 'BOTS', roadmap: 'ROADMAP', tab3: 'CS2', phone: 'Encrypted Phone' },
+    navLabels: { tools: 'TOOLS', bots: 'BOTS', roadmap: 'ROADMAP', tab3: 'CS2W', phone: 'Encrypted Phone' },
     featured: { label: 'Latest Tools & Bots' },
     steamCfg: {
       key: '', proxy: '', bridge: '', bridgeOnly: true, last: '', cache: {}, floatKey: '', hltvKey: '', hltvUrl: '', leetifyKey: '', faceitKey: '', faceitKeyName: '', faceitSeeded: false,
@@ -294,7 +294,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function applySettings() {
     const a = isAdmin();
     if (!settings.discord || settings.discord === 'https://discord.com') settings.discord = DISCORD_URL;   // old default -> the MWAY LABS invite
-    if (!settings.navLabels.tab3 || settings.navLabels.tab3 === 'Gaming') settings.navLabels.tab3 = 'CS2';   // the Gaming icon tab is now the text tab "CS2"
+    if (!settings.navLabels.tab3 || /^(gaming|cs2)$/i.test(settings.navLabels.tab3)) settings.navLabels.tab3 = 'CS2W';   // the Gaming icon tab is now the text tab "CS2W" (same capitalisation as HOME / TOOLS)
     $('#discordBtn').href = settings.discord;
     $('#subText').textContent = settings.subtitle;
     $('#heroTagText').textContent = settings.heroTag;
@@ -950,6 +950,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (local && !bridgeHoldsKey()) q.append('key', cfg.key);   // when the bridge holds STEAM_API_KEY the browser key is never sent
     const r = await proxyReq(`https://api.steampowered.com/${path}/?${q}`, {
       json: true, steamApi: true, ttl: o.ttl == null ? 120000 : o.ttl, timeout: 7000, total: 11000,
+      definitive: o.definitive,   // v10: lets a caller accept a 401/403 as a final answer (private friends list) instead of an error
       check: j => !!j && typeof j === 'object'
     });
     return r.json;
@@ -2181,10 +2182,18 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
   /* Official FACEIT skill-level artwork (SVG from FACEIT's own CDN). If it cannot load (CDN path changed, blocked, offline) the
      image is swapped for the inline ring above by the shared image-error handler (data-fc). */
-  const FC_IMG = 'https://cdn-frontend.faceit.com/web/965/src/static/media/skill-level-{n}.svg';
+  /* v10: the badge is FACEIT's own artwork. The FACEIT Data API supplies the level number (games.cs2.skill_level); the Worker's
+     /faceit/icon/<n> route fetches the official file from FACEIT's CDN (it tries every known CDN path and caches the first real one).
+     The browser tries, in order: the Worker route, then FACEIT's CDN directly. Only if all of them fail does the shared image-error
+     handler (data-fc) fall back to the inline ring above. */
+  const FC_CDN = [
+    'https://cdn-frontend.faceit.com/web/960/src/app/assets/images-compress/skill-icons/skill_level_{n}_svg.svg',
+    'https://cdn-frontend.faceit.com/web/965/src/static/media/skill-level-{n}.svg'
+  ];
+  const fcSrcs = l => (bridgeUrl() ? [bridgeUrl() + '/faceit/icon/' + l] : []).concat(FC_CDN.map(u => u.replace('{n}', l)));
   function faceitBadge(l, px = 60) {
     l = Math.max(1, Math.min(10, Math.round(+l) || 1));
-    return `<img class="fc-ico fc-img" src="${esc(FC_IMG.replace('{n}', l))}" width="${px}" height="${px}" alt="FACEIT level ${l}" title="FACEIT level ${l}" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fc="${l}" data-px="${px}">`;
+    return `<img class="fc-ico fc-img" src="${esc(fcSrcs(l)[0])}" width="${px}" height="${px}" alt="FACEIT level ${l}" title="FACEIT level ${l}" decoding="async" referrerpolicy="no-referrer" data-fc="${l}" data-px="${px}" data-fci="0">`;
   }
   function faceitTile(d, rk) {
     const fc = d.fc || {};
@@ -2414,7 +2423,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const pct = Math.round(rec.w / n * 100), cls = pct >= 55 ? 'good' : pct >= 45 ? 'mid' : 'bad';
     return `<div class="lk-wr ${cls}" title="${pct}% win rate over ${n} recent game${n > 1 ? 's' : ''}"><b>${pct}% Win Rate</b>${rec.w}W - ${rec.l}L${rec.t ? ' - ' + rec.t + 'T' : ''}</div>`;
   }
-  const WR_NOTE = '<p class="muted lk-wr-note">Win rates are calculated per map from the recent matches Leetify returns for this player, so they cover recent games only.</p>';
 
   /* ---- v7: platform icons. Steam and Faceit use the official Simple Icons marks (inline SVG, single colour, same style).
      Leetify and CSStats are not in that set, so their own site icons are loaded (Google's favicon service returns each
@@ -2460,7 +2468,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const r = (X, Y, W, H) => `<rect x="${X.toFixed(1)}" y="${Y.toFixed(1)}" width="${W.toFixed(1)}" height="${H.toFixed(1)}"/>`;
     return `<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g fill="rgb(${x.rgb.join(',')})" opacity="${x.a.toFixed(2)}" stroke="${x.outline ? '#000' : 'none'}" stroke-width="${x.outline ? 0.8 : 0}">${r(20 - G - L, 20 - h, L, T)}${r(20 + G, 20 - h, L, T)}${r(20 - h, 20 - G - L, T, L)}${r(20 - h, 20 + G, T, L)}${x.dot ? r(20 - h, 20 - h, T, T) : ''}</g></svg>`;
   }
-  const mOwn = (m, id) => Array.isArray(m && m.stats) ? (m.stats.find(x => x && String(x.steam64_id) === id) || null) : (m || null);
+  /* v10: tolerant readers for Leetify match objects (field names differ between endpoints / versions) */
+  const mPlayers = m => { const a = m && (Array.isArray(m.stats) ? m.stats : Array.isArray(m.players) ? m.players : Array.isArray(m.lobby) ? m.lobby : null); return a ? a.filter(x => x && typeof x === 'object') : []; };
+  const pidOf = x => String((x && (x.steam64_id || x.steamid || x.steam_id || x.steam64 || x.player_steam64_id)) || '');
+  const teamOf = x => { const t = x && (x.initial_team_number != null ? x.initial_team_number : x.team_number != null ? x.team_number : x.team != null ? x.team : null); return t == null ? null : String(t); };
+  const mOwn = (m, id) => { const a = mPlayers(m); return a.length ? (a.find(x => pidOf(x) === id) || null) : (m || null); };
   function mOutcome(m, id) {   // 'win' | 'loss' | 'tie' | '' for one Leetify match (any source: premier, competitive, faceit ...)
     if (!m) return '';
     const me = mOwn(m, id) || {}, r = String(m.outcome || me.outcome || m.result || '').toLowerCase();
@@ -2503,22 +2515,78 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return null;
   }
   async function statsStart(v, d) {
-    v.xh = { state: 'loading' }; v.form = { state: 'loading' }; v.perf = { state: 'loading' }; updPerf();
-    if (d.lfState !== 'ok') { v.xh = { state: 'na' }; v.form = { state: 'na', list: [] }; v.perf = { state: 'na' }; updPerf(); return; }
+    v.form = { state: 'loading' }; v.perf = { state: 'loading' }; updPerf();
+    if (d.lfState !== 'ok') { v.form = { state: 'na', list: [] }; v.perf = { state: 'na' }; updPerf(); return; }
     let mp; try { mp = await loadMatches(v, d); } catch (e) { mp = { full: null, base: (d.lf && d.lf.recent_matches) || [] }; }
     if (lkv !== v) return;
     const src = (mp.full || mp.base || []).filter(m => m && typeof m === 'object');
     const ts = m => { const t = Date.parse(m.finished_at || m.started_at || ''); return Number.isFinite(t) ? t : 0; };
     const sorted = src.slice().sort((a, b) => ts(b) - ts(a));
     v.form = { state: 'ok', list: sorted.map(m => mOutcome(m, v.id)).filter(Boolean).slice(0, 5) };
-    const rest = Object.assign({}, d.lf); delete rest.recent_matches; delete rest.recent_teammates;
-    let code = xhFind(rest);
-    for (let i = 0; !code && i < sorted.length; i++) { const o = mOwn(sorted[i], v.id); if (o) code = xhFind(o); }
-    diag('info', 'app', 'crosshair: ' + (code ? 'share code found in the Leetify data' : 'no share code in the Leetify data for this player'));
-    v.xh = code ? { state: 'ok', code, dec: xhDecode(code) } : { state: 'na' };
     const aim = Number(d.lf && d.lf.rating && d.lf.rating.aim);
     v.perf = { state: 'ok', kd: kdCalc(sorted, v.id), aim: Number.isFinite(aim) ? Math.max(0, Math.min(100, aim)) : null };
     updPerf();
+  }
+  /* v10: CROSSHAIR. Neither the Steam Web API nor Leetify's public API publishes a player's crosshair share code (it only exists inside
+     the game client / demo files), which is why every lookup said "no crosshair code". Sources, in order:
+       1. the Worker's /crosshair?id= store (codes the admin saved for a player),
+       2. a code the visitor saved for their OWN profile in this browser,
+       3. any share code found in the Leetify profile / match lobby data (in case Leetify adds it).
+     When none exists the box stays clickable for the admin (any player) and for the logged-in owner (own profile) to add a code. */
+  const XH_MINE = 'mway_myxh';
+  const xhOwn = id => !!(session && session.steam && session.id === id);
+  async function xhStart(v, d) {
+    v.xh = { state: 'loading' }; updPerf();
+    let code = '', src = '';
+    const b = bridgeUrl();
+    if (b) {
+      try {
+        const r = await fetchText(b + '/crosshair?id=' + v.id, {}, 6000);
+        const j = r.status === 200 ? JSON.parse(r.text) : null;
+        if (j && XH_RE.test(j.code || '')) { code = String(j.code).match(XH_RE)[0]; src = 'MWAY LABS'; }
+      } catch (e) { /* old Worker (no /crosshair route) or offline: other sources below */ }
+    }
+    if (!code) { const mine = load(XH_MINE, {}) || {}; if (XH_RE.test(mine[v.id] || '')) { code = String(mine[v.id]).match(XH_RE)[0]; src = 'saved in this browser'; } }
+    if (!code && d.lfState === 'ok') {
+      let mp = null; try { mp = await loadMatches(v, d); } catch (e) { /* no match history */ }
+      const rest = Object.assign({}, d.lf); delete rest.recent_matches; delete rest.recent_teammates;
+      code = xhFind(rest); if (code) src = 'Leetify';
+      const list = ((mp && (mp.full || mp.base)) || []).filter(m => m && typeof m === 'object');
+      for (let i = 0; !code && i < list.length; i++) { const o = mOwn(list[i], v.id); if (o) code = xhFind(o); if (code) src = 'Leetify'; }
+    }
+    if (lkv !== v) return;
+    diag('info', 'app', 'crosshair: ' + (code ? 'share code found (' + src + ')' : 'no share code available for this player (Steam and Leetify do not publish one)'));
+    v.xh = code ? { state: 'ok', code, dec: xhDecode(code), src } : { state: 'na', canSet: isAdmin() || xhOwn(v.id) };
+    updPerf();
+  }
+  function xhSetModal(v) {
+    if (!v || !(isAdmin() || xhOwn(v.id))) return;
+    openModal(`<h3>Set crosshair</h3><p class="muted">Paste the CS2 share code for ${esc(v.name || v.id)} (in CS2: Settings &gt; Game &gt; Crosshair &gt; Share or Import Crosshair).</p>
+      <input id="xhSetIn" placeholder="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx" autocomplete="off" spellcheck="false" aria-label="CS2 crosshair share code"><p id="xhSetMsg" class="muted"></p>
+      <div class="row"><button class="btn btn-small" id="xhSetNo">Cancel</button>${isAdmin() ? '<button class="btn btn-small" id="xhSetDel">Remove</button>' : ''}<button class="btn btn-primary btn-small" id="xhSetOk">Save</button></div>`);
+    const msg = t => { const m = $('#xhSetMsg'); if (m) m.textContent = t; };
+    $('#xhSetNo').onclick = closeModal;
+    const apply = code => { if (lkv !== v) return; v.xh = code ? { state: 'ok', code, dec: xhDecode(code), src: 'saved' } : { state: 'na', canSet: true }; updPerf(); };
+    const put = async (method, code) => {   // admin: store on the Worker so every visitor sees it
+      const b = bridgeUrl(), tok = gsToken();
+      if (!b || !tok) throw new Error('Set the bridge URL and the ADMIN_TOKEN (Admin > Global Sync) first.');
+      const res = await fetchText(b + '/crosshair?id=' + v.id, { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: method === 'PUT' ? JSON.stringify({ code }) : undefined }, 15000);
+      if (res.status === 401) throw new Error('the Worker rejected the ADMIN_TOKEN');
+      if (res.status === 404) throw new Error('the Worker is still the old version: deploy the new worker.js');
+      let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+      if (res.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
+    };
+    $('#xhSetOk').onclick = async () => {
+      const code = (($('#xhSetIn').value || '').match(XH_RE) || [''])[0];
+      if (!code) return msg('That is not a CS2 share code (CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx).');
+      try {
+        if (isAdmin()) await put('PUT', code);
+        else { const mine = load(XH_MINE, {}) || {}; mine[v.id] = code; save(XH_MINE, mine); }
+        apply(code); closeModal(); toast('Crosshair saved.');
+      } catch (e) { msg('Could not save: ' + e.message); }
+    };
+    const del = $('#xhSetDel');
+    if (del) del.onclick = async () => { try { await put('DELETE'); apply(''); closeModal(); toast('Crosshair removed.'); } catch (e) { msg('Could not remove: ' + e.message); } };
   }
   function gaugeHTML(cls, label, text, pct, color, info) {
     return `<div class="lk-tile lk-gauge ${cls}"><span class="flabel">${label}</span><div class="lk-g-row"><div class="lk-ring" style="--c:${color}"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="rg-dec" cx="60" cy="60" r="57"/><circle class="rg-track" cx="60" cy="60" r="48"/><circle class="rg-val" cx="60" cy="60" r="48" pathLength="100" style="--p:${pct.toFixed(1)}"/></svg><b>${text}</b></div><div class="lk-g-info">${info}</div></div></div>`;
@@ -2549,10 +2617,13 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const xb = $('#lkXh');
     if (xb && v.xh) {
       const x = v.xh;
-      xb.className = 'lk-xh' + (x.state === 'ok' ? '' : x.state === 'loading' ? ' loading' : ' na');
-      xb.disabled = x.state !== 'ok'; xb.innerHTML = xhSvg(x.state === 'ok' ? x.dec : null);
-      if (x.state === 'ok') { xb.dataset.xh = x.code; xb.title = 'Click to copy this crosshair code, then import it in CS2 (Settings > Game > Crosshair > Import)'; xb.setAttribute('aria-label', 'Copy crosshair code'); }
-      else { delete xb.dataset.xh; xb.title = x.state === 'loading' ? 'Loading crosshair...' : 'No crosshair code available for this player'; }
+      const canSet = x.state === 'na' && x.canSet;
+      xb.className = 'lk-xh' + (x.state === 'ok' ? '' : x.state === 'loading' ? ' loading' : canSet ? ' na set' : ' na');
+      xb.disabled = !(x.state === 'ok' || canSet); xb.innerHTML = xhSvg(x.state === 'ok' ? x.dec : null);
+      delete xb.dataset.xh; delete xb.dataset.xhset;
+      if (x.state === 'ok') { xb.dataset.xh = x.code; xb.title = 'Click to copy this crosshair code, then import it in CS2 (Settings > Game > Crosshair > Import)' + (x.src ? ' (source: ' + x.src + ')' : ''); xb.setAttribute('aria-label', 'Copy crosshair code'); }
+      else if (canSet) { xb.dataset.xhset = '1'; xb.title = 'No crosshair code is stored for this player (Steam and Leetify do not publish one). Click to add it.'; xb.setAttribute('aria-label', 'Add crosshair code'); }
+      else xb.title = x.state === 'loading' ? 'Loading crosshair...' : 'No crosshair code available for this player (Steam and Leetify do not publish crosshair codes)';
     }
   }
   /* banned friends: friend list (needs a public list + Steam key) -> GetPlayerBans in chunks of 100 */
@@ -2561,11 +2632,18 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (!hasSteamKey()) { v.fr = { state: 'nokey' }; updFr(); return; }
     let ids = [];
     try {
-      const r = await steamApi('ISteamUser/GetFriendList/v1', { steamid: v.id, relationship: 'friend' }, { ttl: 300000 });
+      /* v10: Steam answers HTTP 401 for a PRIVATE friends list (that is not a bad key). The Worker turns it into an empty list; for
+         the public proxies / older Workers a 401/403 is accepted here as the final answer so it never shows up as an error. */
+      const r = await steamApi('ISteamUser/GetFriendList/v1', { steamid: v.id, relationship: 'friend' }, { ttl: 300000, definitive: s => s === 401 || s === 403 || s === 404 });
       ids = (((r || {}).friendslist || {}).friends || []).map(f => String(f.steamid)).filter(x => /^\d{17}$/.test(x));
-    } catch (e) { if (lkv !== v) return; v.fr = { state: 'private' }; updFr(); return; }
+    } catch (e) {
+      if (lkv !== v) return;
+      if (e && (e.code === 'AUTH' || e.code === 'KEY')) { diag('info', 'app', 'friends: list is private or Steam refused it (HTTP 401/403), this is not an API key problem'); v.fr = e.code === 'KEY' ? { state: 'nokey' } : { state: 'private' }; }
+      else v.fr = { state: 'err' };
+      updFr(); return;
+    }
     if (lkv !== v) return;
-    if (!ids.length) { v.fr = { state: 'private' }; updFr(); return; }
+    if (!ids.length) { diag('info', 'app', 'friends: list is private or empty'); v.fr = { state: 'private' }; updFr(); return; }
     const capped = ids.slice(0, 1500), chunks = []; for (let i = 0; i < capped.length; i += 100) chunks.push(capped.slice(i, i + 100));
     const acc = { checked: 0, total: ids.length, any: 0, vac: 0, game: 0, trade: 0, comm: 0, failed: 0 };
     let next = 0;
@@ -2589,14 +2667,18 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     diag('info', 'app', 'friends: ' + acc.checked + ' of ' + ids.length + ' checked, ' + acc.any + ' with bans');
     updFr();
   }
-  function updFr() {
+  function updFr() {   // v10: compact box that sits in the top row, right of the "Last 5" form
     const box = $('#lkFr'), f = lkv && lkv.fr; if (!box || !f) return;
-    if (f.state === 'loading') { box.innerHTML = `<p class="muted">${invSpin} Checking friends for bans&hellip;</p>`; return; }
-    if (f.state === 'nokey') { box.innerHTML = '<p class="muted">A Steam Web API key is needed to read the friends list.</p>'; return; }
-    if (f.state === 'private') { box.innerHTML = '<p class="muted">This player\'s friends list is private (or empty), so friends cannot be checked.</p>'; return; }
-    if (f.state === 'err') { box.innerHTML = '<p class="muted">Friend bans could not be loaded right now.</p>'; return; }
-    const chips = [['VAC', f.vac], ['Game ban', f.game], ['Trade ban', f.trade], ['Community', f.comm]].filter(x => x[1] > 0).map(x => `<span class="fr-chip"><b>${x[1]}</b>${x[0]}</span>`).join('');
-    box.innerHTML = `<div class="fr-card ${f.any ? 'bad' : 'clean'}"><div class="fr-num"><b>${f.any}</b></div><div class="fr-b"><span class="fr-t">${f.any ? (f.any === 1 ? 'friend with a ban' : 'friends with bans') : 'No banned friends'}</span><span class="muted">${f.any ? `out of ${f.checked.toLocaleString('en-US')} friends checked` : `${f.checked.toLocaleString('en-US')} friends checked, none flagged`}${f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : ''}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div></div>`;
+    const L = '<span class="fr-mini-l">Banned friends</span>';
+    if (f.state === 'loading') { box.innerHTML = `<div class="fr-mini">${L}<span class="muted">${invSpin}&hellip;</span></div>`; return; }
+    if (f.state === 'nokey') { box.innerHTML = `<div class="fr-mini" title="A Steam Web API key is needed to read the friends list.">${L}<span class="muted">no Steam key</span></div>`; return; }
+    if (f.state === 'private') { box.innerHTML = `<div class="fr-mini" title="This player's friends list is private (or empty), so friends cannot be checked.">${L}<span class="muted">list private</span></div>`; return; }
+    if (f.state === 'err') { box.innerHTML = `<div class="fr-mini" title="Friend bans could not be loaded right now.">${L}<span class="muted">unavailable</span></div>`; return; }
+    const parts = [['VAC', f.vac], ['Game ban', f.game], ['Trade ban', f.trade], ['Community', f.comm]].filter(x => x[1] > 0);
+    const chips = parts.map(x => `<span class="fr-chip"><b>${x[1]}</b>${x[0]}</span>`).join('');
+    const part = f.failed || f.total > f.checked + f.failed ? ' (partial: some batches failed or the list is very large)' : '';
+    const tip = `${f.any} of ${f.checked.toLocaleString('en-US')} friends checked have a ban${parts.length ? ' (' + parts.map(x => x[0] + ' ' + x[1]).join(', ') + ')' : ''}${part}`;
+    box.innerHTML = `<div class="fr-mini ${f.any ? 'bad' : 'clean'}" title="${esc(tip)}">${L}<b class="fr-mini-n">${f.any}</b><span class="fr-mini-s">${f.any ? 'of ' + f.checked.toLocaleString('en-US') + ' checked' : 'none flagged &middot; ' + f.checked.toLocaleString('en-US') + ' checked'}</span>${chips ? `<span class="fr-chips">${chips}</span>` : ''}</div>`;
   }
 
   /* ---- v6: Top 6 teammates (Leetify match history; falls back to recent_teammates counts) ---- */
@@ -2609,25 +2691,32 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       if (lkv !== v) return;
       const agg = {};
       (Array.isArray(matches) ? matches : []).forEach(m => {
-        const st = Array.isArray(m && m.stats) ? m.stats : [], me = st.find(x => x && String(x.steam64_id) === v.id);
-        if (!me || me.initial_team_number == null) return;
-        const team = Number(me.initial_team_number), res = mOutcome(m, v.id);   // v9: tolerant outcome (win/victory/loss/defeat, or the team scores)
+        const st = mPlayers(m), me = st.find(x => pidOf(x) === v.id);
+        if (!me) return;
+        const team = teamOf(me); if (team == null) return;
+        const res = mOutcome(m, v.id);   // tolerant outcome (win/victory/loss/defeat, or the team scores)
         st.forEach(x => {
-          const sid = String((x && x.steam64_id) || ''); if (!sid || sid === v.id || Number(x.initial_team_number) !== team) return;
-          const a = agg[sid] || (agg[sid] = { id: sid, name: x.name || '', n: 0, w: 0, l: 0, k: 0 });
+          const sid = pidOf(x); if (!sid || sid === v.id || teamOf(x) !== team) return;
+          const a = agg[sid] || (agg[sid] = { id: sid, name: x.name || x.nickname || '', n: 0, w: 0, l: 0, k: 0 });
           a.n++; if (res === 'win') { a.w++; a.k++; } else if (res === 'loss') { a.l++; a.k++; } else if (res === 'tie') a.k++;
-          if (!a.name && x.name) a.name = x.name;
+          if (!a.name && (x.name || x.nickname)) a.name = x.name || x.nickname;
         });
       });
-      const allTm = Object.values(agg).sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0));
-      let list = allTm.filter(t => t.n >= 2).concat(allTm.filter(t => t.n < 2)), counts = false;   // v9: repeat teammates first, then fill up to 6
-      if (!list.length) {   // v7: the real Leetify field is recent_matches_count (the old code read recent_matches, which does not exist -> always 0 -> always "no repeat teammates")
-        list = (Array.isArray(lf.recent_teammates) ? lf.recent_teammates : []).filter(t => t && t.steam64_id)
-          .map(t => ({ id: String(t.steam64_id), name: '', n: Number(t.recent_matches_count != null ? t.recent_matches_count : t.recent_matches != null ? t.recent_matches : t.matches_count != null ? t.matches_count : t.count) || 0, w: Number(t.wins) || 0, l: Number(t.losses) || 0, k: (Number(t.wins) || 0) + (Number(t.losses) || 0) }))
-          .filter(t => t.n >= 2);
-        counts = list.length > 0 && !list.some(t => t.k);
+      let list = Object.values(agg), counts = false;
+      /* v10: Leetify's own recent_teammates list tops the result up to 6 (it used to REPLACE the match-based list only when that was
+         empty, which is how a 5-entry list ended up on screen). Players already counted from the matches are not repeated. */
+      if (list.length < 6) {
+        const have = new Set(list.map(t => t.id));
+        (Array.isArray(lf.recent_teammates) ? lf.recent_teammates : []).forEach(t => {
+          const sid = String((t && t.steam64_id) || ''); if (!/^\d{17}$/.test(sid) || sid === v.id || have.has(sid)) return;
+          have.add(sid);
+          const n = Number(t.recent_matches_count != null ? t.recent_matches_count : t.recent_matches != null ? t.recent_matches : t.matches_count != null ? t.matches_count : t.count) || 1;
+          list.push({ id: sid, name: '', n, w: Number(t.wins) || 0, l: Number(t.losses) || 0, k: (Number(t.wins) || 0) + (Number(t.losses) || 0) });
+        });
+        counts = !!list.length && !list.some(t => t.k);
       }
-      list = list.sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0)).slice(0, 6);
+      diag('info', 'app', 'teammates: ' + Object.keys(agg).length + ' from ' + (Array.isArray(matches) ? matches.length : 0) + ' match(es), ' + list.length + ' after top-up');
+      list = list.sort((a, b) => b.n - a.n || (b.k ? b.w / b.k : 0) - (a.k ? a.w / a.k : 0)).slice(0, 6);   // repeat teammates first, then the rest, 6 in total
       if (list.length && hasSteamKey()) {                      // avatars + persona names, one request
         try {
           const sm = await steamApi('ISteamUser/GetPlayerSummaries/v2', { steamids: list.map(t => t.id).join(',') });
@@ -2740,7 +2829,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
          nothing else on the page is rebuilt or blocked;
        - opening another profile (or pressing Retry) cancels the old retry loop through a run token (alive());
        - the Worker (worker.js v7) additionally answers saved copies instantly and refreshes them in the background. */
-  const INV_GAP_MS = 2000, INV_WAITS = [6, 12, 20, 30, 45, 60], INV_LOCAL_KEY = 'mway_invc';
+  const INV_GAP_MS = 2000, INV_WAITS = [6, 12, 20, 30, 45, 60], INV_LOCAL_KEY = 'mway_invc2';   // v10: bumped, saved copies from before the float data (pr) existed are ignored
   const INV_LOCAL_FRESH = 5 * 60 * 1000, INV_LOCAL_KEEP = 7 * 24 * 3600 * 1000;
   let invQueue = Promise.resolve(), invNextAt = 0, invLegacyOff = 0;
   const invSlot = fn => {
@@ -2771,7 +2860,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   async function invFetchLive(id, alive) {
     const defin = (s, t) => s === 404 || ((s === 403 || s === 500) && /^\s*(null|\{)/.test(t || ''));
     let staleAt = 0;
-    const assets = [], descs = {}; let start = '', pages = 0;
+    const assets = [], descs = {}, props = {}; let start = '', pages = 0;
     do {
       const url = `https://steamcommunity.com/inventory/${id}/730/2?l=english&count=1000` + (start ? '&start_assetid=' + start : '');
       let r;
@@ -2781,6 +2870,21 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const j = r.json;
       if (j.success === false || j.success === 0) { if (!pages) return null; break; }
       (j.assets || []).forEach(a => assets.push(a));
+      /* v10: Steam ships the float of every CS2 item itself in asset_properties (propertyid 1 = pattern template, 2 = wear rating /
+         float, 6 = the self-contained inspect payload). The inspect link of those items is "...csgo_econ_action_preview%20%propid:6%",
+         which the old code rejected (placeholder still inside) and therefore showed "n/a". */
+      (j.asset_properties || []).forEach(e => {
+        if (!e || e.assetid == null) return;
+        const o = {};
+        (e.asset_properties || []).forEach(p => {
+          if (!p) return;
+          const pid = +p.propertyid, nm = String(p.name || '').toLowerCase();
+          if (pid === 2 || /wear|float/.test(nm)) { const f = parseFloat(p.float_value != null ? p.float_value : p.string_value); if (Number.isFinite(f) && f >= 0 && f <= 1) o.f = f; }
+          else if (pid === 1 || /pattern/.test(nm)) { const n = parseInt(p.int_value != null ? p.int_value : p.string_value, 10); if (Number.isFinite(n)) o.s = n; }
+          else if (pid === 6 || /certificate|inspect/.test(nm)) { if (p.string_value) o.c = String(p.string_value); }
+        });
+        props[String(e.assetid)] = o;
+      });
       (j.descriptions || []).forEach(x => { descs[x.classid + '_' + x.instanceid] = x; });
       start = j.more_items ? String(j.last_assetid || '') : ''; pages++;
       if (start && pages < 3) await sleep(900);
@@ -2792,10 +2896,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       if (!it) {
         const rar = (x.tags || []).find(t => t.category === 'Rarity');
         const col = /^[0-9a-f]{6}$/i.test(x.name_color || '') ? '#' + x.name_color : rar && /^[0-9a-f]{6}$/i.test(rar.color || '') ? '#' + rar.color : '';
-        it = { name: nm, disp: x.name || nm, icon: x.icon_url || '', color: col, marketable: !!x.marketable, type: x.type || '', qty: 0, ids: [], links: [], link: (x.actions && x.actions[0] && x.actions[0].link) || '' };
+        it = { name: nm, disp: x.name || nm, icon: x.icon_url || '', color: col, marketable: !!x.marketable, type: x.type || '', qty: 0, ids: [], links: [], pr: [], link: (x.actions && x.actions[0] && x.actions[0].link) || '' };
         g.set(nm, it);
       }
       it.qty += Number(a.amount) || 1; it.ids.push(a.assetid);
+      { const p = props[String(a.assetid)]; it.pr.push(p && (p.f != null || p.s != null || p.c) ? (p.f != null ? { f: p.f, s: p.s } : { s: p.s, c: p.c }) : null); }   // v10: the cert is only kept when no float came with it (keeps the saved copy small)
       it.links.push((x.actions && x.actions[0] && x.actions[0].link) || it.link || '');   // each asset keeps the link of ITS description (the D code differs between stickered / patterned copies)
     });
     const out = [...g.values()]; if (staleAt) out.staleAt = staleAt;   // v4: the Worker served a saved copy because Steam was limiting
@@ -3206,8 +3311,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
        steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20S{steamid64}A{assetid}D{d}
      (market M...A...D... and self-encoded hex links keep their payload). Returns '' when no valid link can be built. */
   const INSPECT_PREFIX = 'steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20';
-  function inspectLink(raw, steamId, assetId) {
+  function inspectLink(raw, steamId, assetId, pr) {
     let s = String(raw || '').trim(); if (!s) return '';
+    s = s.replace(/(?:%25|%)propid(?::|%3A)(\d+)(?:%25|%)/gi, (all, n) => (+n === 6 && pr && pr.c) ? pr.c : all);   // v10: new-style links carry the payload as property 6
     const owner = String(steamId || '').replace(/\D/g, ''), asset = String(assetId || '').replace(/\D/g, '');
     s = s.replace(/(?:%5B|\[|%)\s*(?:owner_steamid|owner_id|ownerid|owner)\s*(?:%5D|\]|%)/gi, owner)
          .replace(/(?:%5B|\[|%)\s*(?:asset_id|assetid)\s*(?:%5D|\]|%)/gi, asset);
@@ -3283,39 +3389,54 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
   async function itemModal(name) {
     const v = lkv, it = v && v.inv.items.find(x => x.name === name); if (!it) return;
-    const p = v.price[it.name], link = inspectLink((it.links && it.links[0]) || it.link, v.id, it.ids[0]);
-    const money = usd => `<b data-usd="${usd}">${fmtMoney(usd)}</b>`;
+    const p = v.price[it.name], money = usd => `<b data-usd="${usd}">${fmtMoney(usd)}</b>`;
+    const prOf = i => (it.pr && it.pr[i]) || null, rawOf = i => (it.links && it.links[i]) || it.link || '';
+    const linkOf = i => inspectLink(rawOf(i), v.id, it.ids[i], prOf(i));
+    const hasF = i => { const q = prOf(i); return !!q && Number.isFinite(q.f); };
+    const hasAct = !!(it.link || (it.links || []).some(Boolean)), floaty = hasAct || it.ids.some((_, i) => hasF(i));
+    const sel = floaty && it.ids.length > 1 ? `<div class="inv-row"><span class="flabel">Copy</span><select id="imSel" aria-label="Choose which copy to inspect">${it.ids.slice(0, 60).map((_, i) => `<option value="${i}">#${i + 1}${hasF(i) ? ' \u00b7 ' + prOf(i).f.toFixed(4) : ''}</option>`).join('')}</select></div>` : '';
     openModal(`<h3 style="color:${esc(it.color || 'inherit')}">${esc(it.disp)}</h3>
       <div class="inv-md">${itemImg(it) ? `<img src="${esc(itemImg(it))}" alt="" referrerpolicy="no-referrer" data-ifb="1">` : ''}<div>
         <div class="muted">${esc(it.type)}</div>
         <div class="inv-row"><span class="flabel">Quantity</span><b>${it.qty}</b></div>
         <div class="inv-row"><span class="flabel">Steam Market</span>${it.marketable ? (p && p.steam ? money(p.steam) : '<b>unavailable</b>') : '<b>not marketable</b>'}</div>
         <div class="inv-row"><span class="flabel">CSFloat</span>${it.marketable ? (hasFloat() ? (p && p.csf ? money(p.csf) : '<b>unavailable</b>') : `<b>${isAdmin() ? 'no key: add one in Admin' : 'not provided yet'}</b>`) : '<b>not marketable</b>'}</div>
-        <div class="inv-row"><span class="flabel">Float</span><b id="imFloat">${link ? 'loading&hellip;' : 'n/a'}</b></div>
-        ${link ? `<div class="inv-row"><span class="flabel">Wear</span><b id="imWear">&hellip;</b></div>
+        ${sel}
+        <div class="inv-row"><span class="flabel">Float</span><b id="imFloat">${floaty ? 'loading&hellip;' : 'n/a'}</b></div>
+        ${floaty ? `<div class="inv-row"><span class="flabel">Wear</span><b id="imWear">&hellip;</b></div>
         <div class="inv-row"><span class="flabel">Paint seed</span><b id="imSeed">&hellip;</b></div>` : ''}
-        <div id="imExtra" class="muted"></div></div></div>
-      <div class="inv-actions"><button class="btn btn-primary btn-small" id="imOk">Close</button>${link ? `<a class="btn btn-small" id="imInspect" href="${esc(link)}">Inspect in Game</a><button type="button" class="btn btn-small" id="imCopy">Copy inspect link</button>` : ''}</div>`);
+        <div id="imExtra" class="muted">${floaty ? '' : 'This item type (case, sticker, key, agent ...) has no float value.'}</div></div></div>
+      <div class="inv-actions"><button class="btn btn-primary btn-small" id="imOk">Close</button>${floaty ? '<a class="btn btn-small hidden" id="imInspect" href="#">Inspect in Game</a><button type="button" class="btn btn-small hidden" id="imCopy">Copy inspect link</button>' : ''}</div>`);
     $('#imOk').onclick = closeModal;
-    if (!link) return;
-    const cp = $('#imCopy'); if (cp) cp.onclick = async () => toast(await copyText(link) ? 'Inspect link copied.' : 'Copy failed.');
+    if (!floaty) return;
+    const idx = () => +(($('#imSel') || {}).value) || 0;
+    const cp = $('#imCopy'); if (cp) cp.onclick = async () => toast(await copyText(linkOf(idx())) ? 'Inspect link copied.' : 'Copy failed.');
     const set = (id, t) => { const el = $(id); if (el) el.textContent = t; };
     const run = async () => {
       const el = $('#imFloat'); if (!el) return;
+      const i = idx(), link = linkOf(i), q = prOf(i), a = $('#imInspect'), cb = $('#imCopy');
+      if (a) { a.href = link || '#'; a.classList.toggle('hidden', !link); }
+      if (cb) cb.classList.toggle('hidden', !link);
       el.textContent = 'loading\u2026'; set('#imWear', '\u2026'); set('#imSeed', '\u2026'); const ex0 = $('#imExtra'); if (ex0) ex0.textContent = '';
       try {
-        const x = await inspFloat(link), el2 = $('#imFloat'); if (!el2) return;
+        let x;
+        if (q && Number.isFinite(q.f)) x = { floatvalue: q.f, paintseed: q.s != null ? q.s : null, wear_name: wearOf(q.f), stickerNames: [], stickerCount: 0, via: 'Steam inventory data' };   // v10: no external service needed
+        else if (link) x = await inspFloat(link);
+        else throw Object.assign(netErr('INSPECT', 'Steam sent no float data for this copy'), { nodata: true });
+        const el2 = $('#imFloat'); if (!el2) return;
         el2.textContent = x.floatvalue.toFixed(8);
         set('#imWear', x.wear_name || wearOf(x.floatvalue)); set('#imSeed', x.paintseed != null ? String(x.paintseed) : 'n/a');
         const ex = $('#imExtra'); if (ex) ex.textContent = [x.stickerNames.length ? 'Stickers: ' + x.stickerNames.join(', ') : x.stickerCount ? x.stickerCount + ' sticker/keychain slot(s)' : '', 'Source: ' + x.via].filter(Boolean).join(' \u00b7 ');
       } catch (e) {
         const el2 = $('#imFloat'), ex = $('#imExtra'); if (!el2 || !ex) return;
         el2.textContent = 'unavailable'; set('#imWear', 'unavailable'); set('#imSeed', 'unavailable');
-        ex.innerHTML = e.bad ? `<div>This item's inspect link could not be used${e.message ? ' (' + esc(e.message) + ')' : ''}. You can still open it with Inspect in Game.</div>`
+        ex.innerHTML = e.nodata ? '<div>Steam did not send float data for this copy (the item may be new, untradable or not a weapon skin).</div>'
+          : e.bad ? `<div>This item's inspect link could not be used${e.message ? ' (' + esc(e.message) + ')' : ''}. You can still open it with Inspect in Game.</div>`
           : `<div>The float service is not answering${e.message ? ' (' + esc(e.message) + ')' : ''}.${e.retryAfter ? ' Try again in about ' + e.retryAfter + ' s.' : ''}</div><div class="row"><button type="button" class="btn btn-small" id="imRetry">Retry</button></div>`;
         const rb = $('#imRetry'); if (rb) rb.onclick = run;
       }
     };
+    const ss = $('#imSel'); if (ss) ss.onchange = run;
     run();
   }
 
@@ -3347,7 +3468,6 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         <div class="tf-chips">${tr.f.map(x => `<span class="tf-chip ${x.good ? 'good' : x.p < 0 ? 'bad' : ''}"><i>${x.p > 0 ? '+' + x.p : x.p}</i>${esc(x.label)}</span>`).join('')}</div>
       </div></div>`;
   }
-  const TF_NOTE = '<p class="muted tf-note">Valve\'s real Trust Factor is private. This is an estimate from public signals (account age, level, playtime, bans, ranks, HLTV when configured), not an official value.</p>';
 
   function lkRender(d) {
     const lf = d.lf || {}, rk = lf.ranks || {}, tr = lkTrust(d);
@@ -3373,7 +3493,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const links = `<div class="lk-links"><button type="button" id="lkXh" class="lk-xh loading" disabled aria-label="Player crosshair"></button>${[lkIcon('steam', url, 'Steam Profile'),
       rk.faceit || fcNick ? lkIcon('faceit', faceitUrl, 'Faceit Profile') : '',
       lkIcon('leetify', 'https://leetify.com/app/profile/' + d.id, 'Leetify Profile'),
-      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div></div>`;
+      lkIcon('csstats', 'https://csstats.gg/player/' + d.id, 'CSStats Profile')].join('')}<div id="lkForm" class="lk-form" role="img" aria-label="Results of the last 5 matches"></div><div id="lkFr" class="lk-fr"></div></div>`;
     /* v7: the Faceit and Premier boxes (plus the Trust Factor beside them) are ALWAYS rendered, so the layout never collapses
        when a player has no rank, no Faceit account or no Leetify data: the empty boxes say "Unranked" instead. */
     const hc = d.hltv >= 1.1 ? '#4fb286' : d.hltv >= 1 ? '#5b8def' : d.hltv >= 0.9 ? '#d1a455' : '#d1556a';
@@ -3389,8 +3509,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
           ${tm.length ? `<div class="lk-maps-wrap"><span class="flabel">Top ${tm.length} played map${tm.length > 1 ? 's' : ''}</span><div class="lk-maps">${tm.map(m => `<div class="lk-rank" title="${esc(COMP[m.rank] || '')}">${rankIcon(m.rank, 76)}<span>${esc(mapName(m.map))}</span>${wrHTML(rec[m.map])}</div>`).join('')}</div></div>` : ''}
         </div></div></div>
       <div id="lkPerf" class="lk-perf"></div>
-      ${TF_NOTE}
-      ${d.lfState === 'ok' ? WR_NOTE
+      ${d.lfState === 'ok' ? ''
         : d.lfState === 'none' ? '<p class="muted">No Leetify profile exists for this player (or it is set to private), so CS2 rank data is unavailable.</p>'
         : d.lfState === 'auth' ? '<p class="muted">Leetify asked for authentication. Add a Leetify API key in Admin to load CS2 rank data.</p>'
         : d.lfState === 'rate' ? `<p class="muted">Leetify is rate limiting requests right now. <button type="button" class="btn btn-small" data-lk-retry="${esc(d.id)}">Retry</button></p>`
@@ -3405,10 +3524,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         ${links}</div>${badges}</div>
       ${d.steamNote ? `<p class="muted">${esc(d.steamNote)}</p>` : ''}
       <span class="flabel mt-s">CS2 player data</span>${cs2}
-      ${d.lfState === 'ok' ? '<p class="muted">CS2 rank data provided by <a href="https://leetify.com" target="_blank" rel="noopener">Leetify</a>.</p>' : ''}
-      ${d.fc && d.fc.state === 'ok' ? '<p class="muted">FACEIT level and ELO provided by the <a href="https://docs.faceit.com/docs/data-api/data" target="_blank" rel="noopener">FACEIT Data API</a>.</p>' : ''}
       <span class="flabel mt-s">Top 6 Teammates</span><div id="lkTm" class="lk-tm"></div>
-      <span class="flabel mt-s">Banned friends</span><div id="lkFr" class="lk-fr"></div>
       <span class="flabel mt-s">Inventory value</span><div id="lkInv" class="lk-inv"></div>
       <div id="lkTabs" class="lk-tabs" role="tablist"></div><div id="lkTabBody" class="lk-tabbody hidden"></div>
     </div>`;
@@ -3423,7 +3539,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (d.pub === false) {
       v.inv = { state: 'private', items: [] }; v.com = { state: 'closed', list: [] }; updInv(); updTabs();
     } else { invStart(v); comStart(v); }     // v6: inventory, comments and teammates are separate async jobs: none waits for another
-    tmStart(v, d); statsStart(v, d); frStart(v, d);   // v9
+    tmStart(v, d); statsStart(v, d); xhStart(v, d); frStart(v, d);   // v9 / v10 (crosshair has its own job)
   }
 
   async function lkSearch(force) {
@@ -3498,6 +3614,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     out.addEventListener('click', async e => {
       const t = e.target, cp = t.closest('[data-cp]');
       if (cp) return toast(await copyText(cp.dataset.cp) ? 'Copied.' : 'Copy failed.');
+      const xhs = t.closest('[data-xhset]'); if (xhs) return xhSetModal(lkv);   // v10
       const xhb = t.closest('[data-xh]'); if (xhb) return toast(await copyText(xhb.dataset.xh) ? 'Crosshair code copied. In CS2: Settings > Game > Crosshair > Import.' : 'Copy failed.');   // v9
       if (t.closest('[data-cp-all]') && lkv) return toast(await copyText((lkv.ids || []).map(([l, x]) => l + ': ' + x).join('\n')) ? 'All IDs copied.' : 'Copy failed.');
       if (t.closest('[data-com-more]') && lkv) return comMore(lkv);
@@ -3534,7 +3651,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       else if (img.dataset.yfb) { const w = document.createElement('span'); w.innerHTML = yearSVG(+img.dataset.yfb, +img.dataset.px || 46); img.replaceWith(w.firstChild); }
       else if (img.dataset.rk) { const w = document.createElement('span'); w.className = 'rk-txt'; w.textContent = COMP[+img.dataset.rk] || 'Rank'; img.replaceWith(w); }
       else if (img.dataset.gfb) { const w = document.createElement('span'); w.innerHTML = gcSVG(+img.dataset.gfb, +img.dataset.px || 46); img.replaceWith(w.firstChild); }
-      else if (img.dataset.fc) { const w = document.createElement('span'); w.innerHTML = faceitIcon(+img.dataset.fc, +img.dataset.px || 60); img.replaceWith(w.firstChild); }
+      else if (img.dataset.fc) {   // v10: next official source first, the inline ring only when every source failed
+        const srcs = fcSrcs(+img.dataset.fc), i = (+img.dataset.fci || 0) + 1;
+        if (i < srcs.length) { img.dataset.fci = String(i); img.src = srcs[i]; }
+        else { const w = document.createElement('span'); w.innerHTML = faceitIcon(+img.dataset.fc, +img.dataset.px || 60); img.replaceWith(w.firstChild); }
+      }
       else if (img.dataset.ifb) img.style.visibility = 'hidden';
     };
     out.addEventListener('error', imgFail, true);
