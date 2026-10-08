@@ -11,6 +11,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
      ===================================================================== */
   const MASTER = 'user';
   const VAULT_CODE = '1337';
+  /* Steam accounts with full admin rights (the Worker recognises the same IDs, see ADMIN_STEAM_IDS in worker.js). */
+  const ADMIN_STEAM_IDS = ['76561199124341488', '76561198769479051'];
   const load = (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } };
   /* Global site state (settings) is mirrored to the Worker so visitors on any device see it. See "12g. GLOBAL SYNC". */
   const GLOBAL_KEYS = ['mway_settings'];
@@ -31,6 +33,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const DS = {
     discord: DISCORD_URL,
     subtitle: '// secure research & development node',
+    subStyle: { color: '', size: 'm' },
+    aboutText: '',
     heroTag: 'ENCRYPTED CHANNEL // NODE',
     steam: true,
     cvVisible: true,
@@ -40,7 +44,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     tabs: { roadmap: true, tab3: true },
     pinnedVisible: true,
     pinnedLabel: 'Newest CS2 Tools',
-    pinned: { account: true, crosshair: true },
+    pinned: { account: true, crosshair: true, utilities: true, leaderboard: false },
     roadmapVisible: true,
     navLabels: { roadmap: 'ROADMAP', tab3: 'CS2' },
     steamCfg: {
@@ -65,7 +69,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function buildSettings(saved) {
     saved = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
     const st = Object.assign({}, DS, saved);
-    ['tabs', 'navLabels', 'pinned', 'steamCfg'].forEach(k => { st[k] = Object.assign({}, DS[k], saved[k]); });
+    ['tabs', 'navLabels', 'pinned', 'subStyle', 'steamCfg'].forEach(k => { st[k] = Object.assign({}, DS[k], saved[k]); });
     ['tools', 'bots', 'phone', 'tab4'].forEach(k => { delete st.tabs[k]; delete st.navLabels[k]; });
     ['featured', 'featuredVisible', 'quick'].forEach(k => { delete st[k]; });
     if (!String(st.steamTitle || '').trim()) st.steamTitle = DS.steamTitle;
@@ -81,6 +85,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   let users = load('mway_users', []);
   let session = null;
   try { session = JSON.parse(sessionStorage.getItem('mway_session')); } catch { session = null; }
+  if (session && session.steam && ADMIN_STEAM_IDS.includes(session.id)) { session.role = 'admin'; session.admin = true; }
   let unlocked = sessionStorage.getItem('mway_unlocked') === '1' || (!!session && !session.steam); // Steam sessions never unlock the local login
 
   const isAdmin = () => !!session && (session.master || session.role === 'admin');
@@ -201,13 +206,14 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (location.hash === h || (!h && !location.hash)) return;
     try { history[replace ? 'replaceState' : 'pushState'](null, '', location.pathname + h); } catch { location.hash = h; }
   }
-  /* CS2 tab: dropdown with sub pages: #/gaming/account (player lookup + Steam IDs converter), #/gaming/crosshair and #/gaming/utilities. */
+  /* CS2 tab: dropdown with sub pages: #/gaming/account (player lookup + Steam IDs converter), #/gaming/crosshair, #/gaming/utilities and #/gaming/leaderboard. */
   let tab3Sub = 'account';
   function setSub(sub) {
-    if (sub === 'account' || sub === 'crosshair' || sub === 'utilities') tab3Sub = sub;
+    if (['account', 'crosshair', 'utilities', 'leaderboard'].includes(sub)) tab3Sub = sub;
     $$('[data-subpage]').forEach(el => el.classList.toggle('sub-off', el.dataset.subpage !== tab3Sub));
     $$('#tab3Menu [data-sub]').forEach(b => { const on = b.dataset.sub === tab3Sub; b.classList.toggle('on', on); b.setAttribute('aria-current', on ? 'true' : 'false'); });
     if (tab3Sub === 'utilities') utEnter();
+    if (tab3Sub === 'leaderboard') lbEnter();
   }
   function ddOpen(open) {
     const m = $('#tab3Menu'), b = $('#tab3Btn'); if (!m || !b) return;
@@ -250,6 +256,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (!settings.navLabels.tab3 || /^(gaming|cs2w)$/i.test(settings.navLabels.tab3)) settings.navLabels.tab3 = 'CS2';   // the Gaming icon tab is now the text tab "CS2W" (same capitalisation as HOME / TOOLS)
     $('#discordBtn').href = settings.discord;
     $('#subText').textContent = settings.subtitle;
+    { const ss = settings.subStyle || {}, el = $('#subText'); el.style.color = /^#[0-9a-f]{6}$/i.test(ss.color || '') ? ss.color : ''; el.style.fontSize = { s: '.85em', l: '1.2em', xl: '1.45em' }[ss.size] || ''; }
     $('#heroTagText').textContent = settings.heroTag;
     $$('[data-lbl]').forEach(el => { el.textContent = settings.navLabels[el.dataset.lbl]; });
     { const b = $('#tab3Btn'); b.title = settings.navLabels.tab3; b.setAttribute('aria-label', settings.navLabels.tab3); }
@@ -272,7 +279,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function applyAuth() {
     $('#loginBtn').textContent = session && !session.steam ? (session.master ? 'Admin' : session.u) + ' (Logged In)' : 'Log In';
     $('#steamLoginBtn').classList.toggle('on', !!(session && session.steam));
-    $('#steamLoginBtn .sl-text').textContent = session && session.steam ? (session.name || session.id) + ' (Steam)' : 'Log in with Steam';
+    $('#steamLoginBtn .sl-text').textContent = session && session.steam ? (session.name || session.id) + (session.admin ? ' (Steam Admin)' : ' (Steam)') : 'Log in with Steam';
     $$('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin()));
     if (!isAdmin()) { cancelAboutEdit(); cancelSteamEdit(); wipeOtp(); }
     applySettings(); renderAdmin(); renderXhSaved(); cvSyncMine(); utRefresh();
@@ -501,12 +508,24 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     }
   }
 
+  async function adminCheck(quiet) {
+    if (!session || !session.admin) return;
+    const b = bridgeUrl(), el = $('#adminSrv'), set = (t, bad) => { if (el) { el.textContent = t; el.style.color = bad ? 'var(--danger)' : ''; } if (bad && !quiet) toast(t); };
+    if (!b) return set('Steam admin: set the Worker bridge URL (Admin > Steam API Provisioning) so admin actions reach the server.', true);
+    if (!session.tok) return set('Steam admin: this login got no server token. Deploy the newest worker.js (its ADMIN_TOKEN secret must be set), then log in with Steam again.', true);
+    try {
+      const r = JSON.parse((await fetchText(b + '/whoami', { headers: { Authorization: 'Bearer ' + session.tok } }, 10000)).text);
+      if (r && r.admin) set('Steam admin: server access confirmed (changes are published to every visitor).');
+      else set(r && r.secret === false ? 'Steam admin: the Worker has no ADMIN_TOKEN secret, so it cannot issue admin tokens. Set it in the Worker settings.' : 'Steam admin: the Worker did not accept this login as admin. Deploy the newest worker.js and log in again.', true);
+    } catch { set('Steam admin: could not reach the Worker to confirm access (an older worker.js has no /whoami).', true); }
+  }
   let steamTok = '';
   function finishSteamLogin(id) {
-    session = { u: 'steam:' + id, id, name: id, steam: true, master: false, role: 'steam', tok: steamTok };
+    const adm = ADMIN_STEAM_IDS.includes(id);
+    session = { u: 'steam:' + id, id, name: id, steam: true, master: false, role: adm ? 'admin' : 'steam', admin: adm, tok: steamTok };
     steamTok = '';
     sessionStorage.setItem('mway_session', JSON.stringify(session));
-    applyAuth(); toast('Logged in with Steam.');
+    applyAuth(); toast(adm ? 'Logged in with Steam as admin.' : 'Logged in with Steam.'); if (adm) adminCheck();
     if (settings.tabs.tab3 !== false) {
       showTab('tab3', { id: 'account' });
       $('#lkIn').value = id;
@@ -590,20 +609,28 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const title = $('#aboutTitleInput').value.trim(), v = $('#aboutInput').value.trim();
     if (!title) return toast('Title cannot be empty.');
     if (!v) return toast('Description cannot be empty.');
-    about = v; settings.aboutTitle = title;
+    about = v; settings.aboutTitle = title; settings.aboutText = v;
     save('mway_about', about); save('mway_settings', settings);
     renderAbout(); cancelAboutEdit(); toast('About section updated.');
   });
   $('#aboutToggle').addEventListener('change', e => { settings.aboutVisible = e.target.checked; save('mway_settings', settings); renderAbout(); });
 
   $('#editSubBtn').addEventListener('click', () => {
-    openModal(`<h3>Edit Subtitle</h3><p>Text shown beneath the main title.</p>
+    const ss = settings.subStyle || {};
+    openModal(`<h3>Edit Subtitle</h3><p>Text and look of the line beneath the main title. Saved for every visitor.</p>
       <input id="subInput" value="${esc(settings.subtitle)}" maxlength="120">
+      <div class="row"><label class="flabel">Colour <input id="subColor" type="color" value="${/^#[0-9a-f]{6}$/i.test(ss.color || '') ? ss.color : '#8793a5'}"></label>
+      <label class="flabel">Size <select id="subSize">${[['s', 'Small'], ['m', 'Normal'], ['l', 'Large'], ['xl', 'Extra large']].map(([k, n]) => `<option value="${k}"${(ss.size || 'm') === k ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+      <button class="btn btn-small" id="subReset" type="button">Reset look</button></div>
       <div class="row"><button class="btn btn-small" id="sc">Cancel</button><button class="btn btn-primary btn-small" id="ss">Save</button></div>`);
+    let reset = !ss.color;
+    $('#subColor').oninput = () => { reset = false; };
+    $('#subReset').onclick = () => { reset = true; $('#subSize').value = 'm'; toast('Look reset: press Save to apply.'); };
     $('#sc').onclick = closeModal;
     $('#ss').onclick = () => {
       const v = $('#subInput').value.trim(); if (!v) return toast('Subtitle cannot be empty.');
-      settings.subtitle = v; save('mway_settings', settings); closeModal(); applySettings();
+      settings.subtitle = v; settings.subStyle = { color: reset ? '' : $('#subColor').value, size: $('#subSize').value };
+      save('mway_settings', settings); closeModal(); applySettings(); toast('Subtitle updated.');
     };
   });
   $('#editTagBtn').addEventListener('click', () => {
@@ -620,8 +647,10 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
   /* Pinned CS2 tools: admins choose which new tools are highlighted on the Home page; a click opens the tool's page. */
   const PIN_TOOLS = {
-    account: { title: 'Account Search', desc: 'Look up any Steam / CS2 profile: ranks, FACEIT, Leetify, inventory value and more.', icon: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>' },
-    crosshair: { title: 'Crosshair Generator', desc: 'Build, preview and import CS2 crosshair share codes.', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>' }
+    account: { title: 'Account Search', badge: 'V1', hue: '#5b8def', desc: 'Look up any Steam / CS2 profile: Premier and FACEIT ranks, Leetify stats, inventory value, bans and more.', tags: ['Profile', 'Ranks', 'Inventory'], icon: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>' },
+    crosshair: { title: 'Crosshair Generator', badge: 'V1', hue: '#c58bff', desc: 'Design, preview on official map screenshots and import CS2 crosshair share codes.', tags: ['Preview', 'Import', 'Share code'], icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>' },
+    utilities: { title: 'Utilities', badge: 'BETA', hue: '#ffb454', desc: 'Lineup maps on Valve\'s official radars. Drop smokes, flashes and mollies with YouTube or Discord videos.', tags: ['Official radars', 'Lineups', 'Video'], icon: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>' },
+    leaderboard: { title: 'Leaderboard', badge: 'NEW', hue: '#4fd6a0', desc: 'Top 100 Premier and FACEIT players, one click away from their full profile.', tags: ['Premier', 'FACEIT', 'Top 100'], icon: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>' }
   };
   function renderPinned() {
     const sec = $('#pinnedSection'), on = settings.pinnedVisible !== false, keys = Object.keys(PIN_TOOLS).filter(k => settings.pinned[k]);
@@ -629,10 +658,12 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#pinnedToggle').checked = on;
     sec.classList.toggle('hidden', (!on || !keys.length) && !isAdmin());
     sec.classList.toggle('faded', !on);
-    $('#pinnedBody').innerHTML = keys.length ? keys.map(k => { const p = PIN_TOOLS[k]; return `<div class="card pin-card" role="link" tabindex="0" data-pin="${k}" aria-label="Open ${esc(p.title)}">
-        <span class="pin-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p.icon}</svg></span>
-        <div class="pin-txt"><div class="pin-top"><strong>${esc(p.title)}</strong><span class="badge">NEW</span></div><p class="muted">${esc(p.desc)}</p></div>
-        <span class="pin-go" aria-hidden="true">OPEN &rarr;</span></div>`; }).join('')
+    $('#pinnedBody').innerHTML = keys.length ? keys.map((k, i) => { const p = PIN_TOOLS[k]; return `<div class="card pin-card" style="--pc:${p.hue};--i:${i}" role="link" tabindex="0" data-pin="${k}" aria-label="Open ${esc(p.title)}">
+        <span class="pin-glow" aria-hidden="true"></span>
+        <div class="pin-head"><span class="pin-ico"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p.icon}</svg></span><span class="pin-badge">${esc(p.badge)}</span></div>
+        <h3 class="pin-title">${esc(p.title)}</h3><p class="pin-desc">${esc(p.desc)}</p>
+        <div class="pin-tags">${p.tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
+        <div class="pin-go">OPEN TOOL <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div></div>`; }).join('')
       : '<div class="panel"><p class="muted">No tools pinned. Use Edit Section to pin one.</p></div>';
   }
   function openPinned(k) {
@@ -1110,7 +1141,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       fcg.faceitSeeded = true; save('mway_settings', settings); keysAfterRead({ faceit: '' });
     }
     if ($('#stFaceitName')) $('#stFaceitName').value = fcg.faceitKeyName || FACEIT_DEFAULT.name;
-    $('#stFaceit').value = fcg.faceitKey || ''; $('#gsToken').value = gsToken(); gsStatus(GS.msg || gsIdleMsg(), GS.bad);
+    $('#stFaceit').value = fcg.faceitKey || ''; $('#gsToken').value = gsStored(); gsStatus(GS.msg || gsIdleMsg(), GS.bad);
     $('#stFloat').value = settings.steamCfg.floatKey || ''; $('#stHltvKey').value = settings.steamCfg.hltvKey || ''; $('#stHltvUrl').value = settings.steamCfg.hltvUrl || ''; $('#stLeetify').value = settings.steamCfg.leetifyKey || '';
     stStatus(settings.steamCfg.last ? 'Last sync: ' + fmtTime(settings.steamCfg.last) : 'Not synced yet. Showing profile links only.');
     renderUsers(); renderMailing(); renderRmRows(); diagBadge();
@@ -1161,11 +1192,28 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         ${mini ? '' : `<div class="rm-status">${RM_STATUS[m.status]}</div><div class="rm-desc">${esc(m.desc)}</div>`}
       </div>`).join('')}</div>`;
   }
+  let rmFilter = 'all';
+  function rmPageHTML() {
+    const s = rmStats(), act = roadmap.find(m => m.status === 'active'), C = 2 * Math.PI * 52, cnt = k => roadmap.filter(m => m.status === k).length;
+    const heroT = act ? 'Now building: ' + act.name : s.done === s.n ? 'Every milestone reached' : 'Up next', heroD = act ? act.desc : (roadmap.find(m => m.status === 'planned') || {}).desc || 'The roadmap is complete.';
+    const rows = roadmap.map((m, i) => ({ m, i })).filter(x => rmFilter === 'all' || x.m.status === rmFilter);
+    return `<div class="rmx-hero">
+        <div class="rmx-ringwrap"><svg viewBox="0 0 120 120" class="rmx-ring" aria-hidden="true"><circle cx="60" cy="60" r="52" class="t"/><circle cx="60" cy="60" r="52" class="f" style="stroke-dasharray:${(C * s.pct / 100).toFixed(1)} ${C.toFixed(1)}"/></svg><div class="rmx-pct"><b>${s.pct}</b><span>%</span></div></div>
+        <div class="rmx-hinfo"><span class="rmx-eyebrow">MISSION PROGRESS</span><h3>${esc(heroT)}</h3><p class="muted">${esc(heroD)}</p>
+          <div class="rmx-stats"><span class="done"><b>${cnt('done')}</b> reached</span><span class="active"><b>${cnt('active')}</b> in progress</span><span class="planned"><b>${cnt('planned')}</b> planned</span></div></div>
+      </div>
+      <div class="rmx-filter" role="group" aria-label="Filter milestones">${[['all', 'All'], ['done', 'Reached'], ['active', 'In progress'], ['planned', 'Planned']].map(([k, n]) => `<button type="button" class="rmx-chip${rmFilter === k ? ' on' : ''}" data-rmf="${k}" aria-pressed="${rmFilter === k}">${n}</button>`).join('')}</div>
+      <ol class="rmx-tl">${rows.length ? rows.map(({ m, i }, k) => `<li class="rmx-step ${m.status} ${k % 2 ? 'r' : 'l'}" style="--d:${k * 80}ms">
+        <span class="rmx-node" aria-hidden="true">${m.status === 'done' ? '&#10003;' : m.status === 'active' ? '&#9889;' : i + 1}</span>
+        <div class="rmx-card"><div class="rmx-top"><span class="rmx-no">PHASE ${String(i + 1).padStart(2, '0')}</span><span class="rmx-pill">${RM_STATUS[m.status]}</span></div>
+          <h4>${esc(m.name)}</h4>${m.desc ? `<p>${esc(m.desc)}</p>` : ''}<div class="rmx-meter"><i></i></div></div></li>`).join('') : '<li class="muted rmx-empty">Nothing in this filter yet.</li>'}</ol>`;
+  }
+  $('#rmMain').addEventListener('click', e => { const b = e.target.closest('[data-rmf]'); if (b) { rmFilter = b.dataset.rmf; renderRoadmap(); } });
   function renderRoadmap() {
     const a = isAdmin(), s = rmStats(), on = settings.roadmapVisible;
     const head = `<div class="rm-summary"><span class="rm-pct">${s.pct}%</span><span class="muted">${s.done} of ${s.n} milestones reached</span></div>
       <div class="rm-bar" role="progressbar" aria-label="Roadmap progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${s.pct}"><div class="rm-fill" style="width:${s.pct}%"></div></div>`;
-    $('#rmMain').innerHTML = s.n ? head + rmTrackHTML(false) : '<p class="muted">No milestones yet.</p>';
+    $('#rmMain').innerHTML = s.n ? rmPageHTML() : '<div class="panel"><p class="muted">No milestones yet.</p></div>';
     $('#roadmapWidget').innerHTML = s.n ? head + rmTrackHTML(true) + '<div class="rm-link">VIEW FULL ROADMAP &rarr;</div>' : '<p class="muted">No milestones yet.</p>';
     const sec = $('#roadmapSection');
     sec.classList.toggle('hidden', !on && !a); sec.classList.toggle('faded', !on);
@@ -1460,92 +1508,27 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     return { c: xhNorm(c), classic: true, note: 'Imported a classic code. Length, thickness and gap were converted from the old scale to pixels (approximate): fine-tune them with the sliders, and check the result in game.' };
   }
 
-  const XH_MAP_PHOTOS = {
-    dust: ['img/maps/dust2_a.jpg', 'img/maps/dust2_mid.jpg'],
-    nuke: ['img/maps/nuke_ramp.jpg', 'img/maps/nuke_a.jpg'],
-    cache: ['img/maps/cache_mid.jpg', 'img/maps/cache_main.jpg']
-  };
-  const XMAPS = { dust: ['Dust II', ['A Site', 'Mid']], nuke: ['Nuke', ['Ramp', 'A Site']], cache: ['Cache', ['Mid', 'Main']] };
-  const XSCN = {
-    dust: [
-      { s0: '#6fa7d6', s1: '#eadcb8', far: '#d8bd86', wl: '#c7a266', wr: '#b58d4d', f0: '#dcc08a', f1: '#bfa066', pd: 'M0 5H20M10 0V5M0 10V5',
-        ex: '<path d="M118 176v-36a16 16 0 0 1 32 0v36z" fill="#2a2118"/><rect x="170" y="146" width="32" height="30" fill="#9a7a45"/><path d="M170 146h32M186 146v30" stroke="#5d4626" stroke-width="1.5"/><rect x="204" y="156" width="22" height="22" fill="#8a6a3c"/><rect x="92" y="150" width="20" height="26" fill="#c2a06a" opacity=".6"/>' },
-      { s0: '#78aedb', s1: '#f0e2bd', far: '#cfb27a', wl: '#bf9a5e', wr: '#ad8545', f0: '#d6b983', f1: '#b89a5e', pd: 'M0 5H20M10 0V5M0 10V5',
-        ex: '<path d="M120 176v-44h60v44z" fill="#3a2d20"/><rect x="149" y="132" width="2" height="44" fill="#16100a"/><path d="M114 176v-46a36 36 0 0 1 72 0v46z" fill="#f4e8c8" opacity=".22"/><rect x="100" y="120" width="8" height="56" fill="#a98749"/><rect x="192" y="120" width="8" height="56" fill="#a98749"/>' }
-    ],
-    nuke: [
-      { s0: '#8fa4b8', s1: '#cdd5dc', far: '#9aa4ad', wl: '#7e8791', wr: '#6f7882', f0: '#8e979f', f1: '#5f6870', pd: 'M0 10H20M10 0V10',
-        ex: '<rect x="108" y="92" width="40" height="84" fill="#aab3bb"/><ellipse cx="128" cy="92" rx="20" ry="6" fill="#c6ced5"/><path d="M108 120h40M108 146h40" stroke="#7f8890" stroke-width="2"/><polygon points="204,176 300,300 300,236 204,160" fill="#737c85"/><path d="M204 150L300 220" stroke="#e8c32a" stroke-width="3"/><path d="M204 162L300 232" stroke="#e8c32a" stroke-width="3" opacity=".7"/>' },
-      { s0: '#2c3238', s1: '#59626b', far: '#7b858e', wl: '#69737c', wr: '#5a646d', f0: '#7d868e', f1: '#4f575e', pd: 'M0 10H20M10 0V10',
-        ex: '<rect x="0" y="40" width="300" height="6" fill="#b3752f" opacity=".75"/><rect x="0" y="54" width="300" height="4" fill="#8a949c" opacity=".7"/><rect x="96" y="160" width="108" height="8" fill="#e0b81f"/><path d="M100 160l8 8M116 160l8 8M132 160l8 8M148 160l8 8M164 160l8 8M180 160l8 8" stroke="#1d2024" stroke-width="3"/><rect x="150" y="144" width="42" height="34" fill="#a9792f"/><path d="M150 144h42M171 144v34" stroke="#5e4219" stroke-width="1.5"/><rect x="110" y="132" width="26" height="22" fill="#3a4148"/>' }
-    ],
-    cache: [
-      { s0: '#6e7f8f', s1: '#b6bec6', far: '#8b6b58', wl: '#7a5c4b', wr: '#6b4f40', f0: '#8f9296', f1: '#5f6266', pd: 'M0 5H20M0 10H20M5 0V5M15 5V10',
-        ex: '<rect x="130" y="138" width="40" height="38" fill="#3b4148"/><rect x="133" y="141" width="34" height="32" fill="none" stroke="#6b737c" stroke-width="1.5"/><rect x="176" y="150" width="30" height="26" fill="#a2793f"/><path d="M176 150h30M191 150v26" stroke="#5e4219" stroke-width="1.5"/><rect x="96" y="124" width="28" height="6" fill="#4b5158"/>' },
-      { s0: '#59636b', s1: '#9aa3a9', far: '#51625a', wl: '#44544c', wr: '#3b4a43', f0: '#7a7f84', f1: '#53575b', pd: 'M0 10H20M10 0V10',
-        ex: '<rect x="110" y="138" width="80" height="38" fill="#496a55"/><path d="M110 148h80M110 158h80M110 168h80" stroke="#2b4033" stroke-width="1.2"/><path d="M122 300L146 176" stroke="#e5c322" stroke-width="3"/><path d="M178 300L154 176" stroke="#e5c322" stroke-width="3"/><rect x="198" y="152" width="26" height="24" fill="#8a6f3a"/>' }
-    ]
-  };
-  function xhScene(k, v) {
-    const c = XSCN[k][v];
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.s0}"/><stop offset="1" stop-color="${c.s1}"/></linearGradient><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.f0}"/><stop offset="1" stop-color="${c.f1}"/></linearGradient><linearGradient id="c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".38"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/></linearGradient><pattern id="p" width="20" height="10" patternUnits="userSpaceOnUse"><path d="${c.pd}" fill="none" stroke="#000" stroke-opacity=".16"/></pattern></defs><rect width="300" height="300" fill="url(#a)"/><rect x="90" y="108" width="120" height="70" fill="${c.far}"/><polygon points="0,0 96,108 96,176 0,300" fill="${c.wl}"/><polygon points="300,0 204,108 204,176 300,300" fill="${c.wr}"/><polygon points="0,300 96,176 204,176 300,300" fill="url(#b)"/><polygon points="0,0 96,108 96,176 0,300" fill="url(#p)"/><polygon points="300,0 204,108 204,176 300,300" fill="url(#p)"/>${c.ex}<rect width="300" height="300" fill="url(#c)"/></svg>`;
-  }
-  const XH_STEAM = { dust: { q: ['de_dust2', 'dust2'], re: /dust\s*(?:ii|2)|dust2/i }, nuke: { q: ['de_nuke', 'nuke'], re: /nuke/i }, cache: { q: ['de_cache', 'cache'], re: /cache/i } };
-  const XH_IMG_OK = /^https:\/\/(?:[a-z0-9-]+\.)*(?:steamusercontent\.com|steamstatic\.com|akamaihd\.net)\/[^\s"'()<>\\]+$/i, XH_LS = 'mway_xhmaps_v10';
-  const xhSteamMem = {};
-  function xhLsGet() { try { return JSON.parse(localStorage.getItem(XH_LS) || '{}') || {}; } catch (e) { return {}; } }
-  function xhSteamLoad(k) {
-    const cur = xhSteamMem[k];
-    if (cur && (cur.p || Date.now() - cur.t < (cur.imgs.length ? 43200e3 : 600e3))) return cur.p || Promise.resolve(cur.imgs);
-    const ls = xhLsGet()[k];
-    if (ls && Array.isArray(ls.imgs) && ls.imgs.length && Date.now() - ls.t < 43200e3) { xhSteamMem[k] = { t: ls.t, imgs: ls.imgs.filter(u => XH_IMG_OK.test(u)), p: null }; return Promise.resolve(xhSteamMem[k].imgs); }
-    const rec = xhSteamMem[k] = { t: Date.now(), imgs: [], p: null }, cfg = XH_STEAM[k];
-    rec.p = (async () => {
-      const imgs = [];
-      if (!cfg || !hasSteamKey()) return imgs;
-      for (const q of cfg.q) {
-        if (imgs.length >= 5) break;
-        try {
-          const j = await steamApi('IPublishedFileService/QueryFiles/v1', { appid: 730, creator_appid: 730, search_text: q, query_type: 12, page: 1, numperpage: 12, return_previews: 'true', filetype: 0 }, { ttl: 3600000 });
-          (((j || {}).response || {}).publishedfiledetails || []).forEach(f => {
-            if (!f || !cfg.re.test(String(f.title || ''))) return;                       // only entries that really are this map
-            const urls = (Array.isArray(f.previews) ? f.previews : []).filter(p => p && p.url && (p.preview_type == null || +p.preview_type === 0)).map(p => String(p.url));
-            if (f.preview_url) urls.unshift(String(f.preview_url));
-            urls.forEach(u => { if (XH_IMG_OK.test(u) && !imgs.includes(u) && imgs.length < 6) imgs.push(u); });
-          });
-        } catch (e) { diag('warn', 'app', 'map backdrop: Steam Workshop query "' + q + '" failed (' + (e.message || e.code) + ')'); }
-      }
-      diag(imgs.length ? 'info' : 'warn', 'app', 'map backdrop ' + k + ': ' + imgs.length + ' Steam Workshop screenshot(s)');
-      return imgs;
-    })().then(r => {
-      rec.imgs = r; rec.t = Date.now(); rec.p = null;
-      if (r.length) { try { const o = xhLsGet(); o[k] = { t: rec.t, imgs: r }; localStorage.setItem(XH_LS, JSON.stringify(o)); } catch (e) { /* storage full or blocked */ } }
-      return r;
-    });
-    return rec.p;
-  }
-  const xhViews = k => Math.max(2, (xhSteamMem[k] && xhSteamMem[k].imgs.length) || 0);
-  let xhBg = { k: 'dust', v: 0 };
+  /* Backdrops: official in-game CS2 map screenshots (from Valve's game files), bundled as img/maps/<map>_<0-2>.jpg with the same
+     pictures on GitHub as a fallback. Clicking the same map button again shows its next screenshot. */
+  const XMAPS = { dust2: 'Dust II', mirage: 'Mirage', inferno: 'Inferno', nuke: 'Nuke', overpass: 'Overpass', ancient: 'Ancient', anubis: 'Anubis', vertigo: 'Vertigo', train: 'Train' };
+  const XH_VIEWS = 3;
+  const xhViews = () => XH_VIEWS;
+  const xhPics = (k, v) => ['img/maps/' + k + '_' + v + '.jpg', 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_' + k + (v ? '_' + v : '') + '_png.png', 'https://cdn.jsdelivr.net/gh/MurkyYT/cs2-map-icons@main/images/thumbs/de_' + k + (v ? '_' + v : '') + '_png.png'];
+  let xhBg = { k: 'dust2', v: 0 };
   function xhApplyBg() {
-    const cv = $('#xhCv'), lbl = $('#xhBgLbl'), k = xhBg.k, v = xhBg.v;
+    const cv = $('#xhCv'), lbl = $('#xhBgLbl'), k = xhBg.k, v = xhBg.v, say = t => { if (lbl) lbl.textContent = t; };
     $$('#xhBgs button').forEach(b => { const on = k ? b.dataset.map === k : !!b.dataset.bg; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
-    if (!k) { cv.classList.remove('xh-steam'); cv.style.background = '#161b24'; if (lbl) lbl.textContent = ''; return; }
-    cv.classList.remove('xh-steam');
-    cv.style.background = '#161b24 url("data:image/svg+xml;utf8,' + encodeURIComponent(xhScene(k, v % 2)) + '") center / cover no-repeat';   // instant built-in scene
-    const m = XMAPS[k], say = t => { if (lbl) lbl.textContent = t; };
-    say(`${m[0]} - ${m[1][v % 2]} (click ${k.toUpperCase()} again to switch view)`);
-    const localPhoto = () => {
-      const ph = (XH_MAP_PHOTOS[k] || [])[v % 2];
-      if (ph && /^(https:\/\/|[\w./-]+$)/.test(ph)) { const im = new Image(); im.onload = () => { if (xhBg.k === k && xhBg.v === v) cv.style.background = `#161b24 url("${ph}") center / cover no-repeat`; }; im.src = ph; }
+    cv.classList.remove('xh-steam'); cv.style.background = '#161b24';
+    if (!k) return say('');
+    say(`${XMAPS[k]} - official screenshot ${v + 1} of ${XH_VIEWS} (click ${XMAPS[k].toUpperCase()} again for the next view)`);
+    const srcs = xhPics(k, v), load = i => {
+      if (i >= srcs.length) return say(`${XMAPS[k]}: the screenshot could not be loaded.`);
+      const im = new Image();
+      im.onload = () => { if (xhBg.k === k && xhBg.v === v) { cv.classList.add('xh-steam'); cv.style.background = `#161b24 url("${srcs[i]}") center / cover no-repeat`; }
+      };
+      im.onerror = () => load(i + 1); im.src = srcs[i];
     };
-    xhSteamLoad(k).then(imgs => {
-      if (xhBg.k !== k || xhBg.v !== v) return;
-      if (!imgs.length) return localPhoto();
-      const i = v % imgs.length, u = imgs[i], im = new Image();
-      im.onload = () => { if (xhBg.k !== k || xhBg.v !== v) return; cv.classList.add('xh-steam'); cv.style.background = `#161b24 url("${u}") center / cover no-repeat`; say(`${m[0]} - Steam Workshop screenshot ${i + 1} of ${imgs.length} (click ${k.toUpperCase()} again for the next view)`); };
-      im.onerror = localPhoto;
-      im.src = u;
-    });
+    load(0);
   }
   function xhImport() {
     const msg = $('#xhImpMsg'), r = xhDecode($('#xhImp').value);
@@ -1604,7 +1587,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
   function renderXhSaved() {
     const li = !!session, list = li ? (xhStore[session.u] || []) : [];
-    $('#xhSave').classList.toggle('hidden', !li); $('#xhHint').classList.toggle('hidden', li);
+    $('#xhSave').classList.toggle('hidden', !li); $('#xhPublish').classList.toggle('hidden', !(session && session.steam)); $('#xhHint').classList.toggle('hidden', li);
     $('#xhSavedWrap').classList.toggle('hidden', !li || !list.length);
     xhThumbs($('#xhSaved'), list.map(s => Object.assign({}, s, { c: xhMk(s.c) })), s => `<div class="xh-def" data-id="${esc(s.id)}"><canvas width="72" height="72"></canvas><span>${esc(s.n)}</span><div class="row"><button class="btn btn-small" data-xa="load">Load</button><button class="btn btn-small" data-xa="copy">Copy</button><button class="btn btn-small btn-danger" data-xa="del">Del</button></div></div>`);
   }
@@ -1656,6 +1639,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const r = xhFromCmds($('#xhLegOut').value || xhLegacy($('#xhLegIn').value).lines.join('\n'));
       if (!r.n) return toast('Nothing to apply. Convert some commands first.');
       xh = r.c; xhSync(); toast('Applied ' + r.n + ' command(s) to the generator.');
+    });
+    $('#xhPublish').addEventListener('click', async () => {
+      const code = (($('#xhOut').value || '').match(XH_RE) || [''])[0];
+      if (!code) return toast('There is no share code to publish yet.');
+      try { await xhRemote('PUT', session.id, code); toast('Published: anyone who looks you up now sees this crosshair.'); } catch (e) { toast('Could not publish: ' + e.message); }
     });
     $('#xhSave').addEventListener('click', () => {
       if (!session) return;
@@ -2091,30 +2079,31 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     v.xh = code ? { state: 'ok', code, dec: xhDecode(code), src } : { state: 'na', canSet: isAdmin() || xhOwn(v.id) };
     updPerf();
   }
+  async function xhRemote(method, id, code) {   // store on the Worker so every visitor sees it: the owner (Steam login) or an admin
+    const b = bridgeUrl(), tok = (session && session.tok) || gsToken();
+    if (!b || !tok) throw new Error('log in with Steam again (and make sure the Worker bridge is set).');
+    const res = await fetchText(b + '/crosshair?id=' + id, { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: method === 'PUT' ? JSON.stringify({ code }) : undefined }, 15000);
+    if (res.status === 401) throw new Error('the Worker rejected this login (log in with Steam again)');
+    if (res.status === 404) throw new Error('the Worker is still the old version: deploy the new worker.js');
+    let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+    if (res.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
+  }
   function xhSetModal(v) {
     if (!v || !(isAdmin() || xhOwn(v.id))) return;
     openModal(`<h3>Set crosshair</h3><p class="muted">Paste the CS2 share code for ${esc(v.name || v.id)} (in CS2: Settings &gt; Game &gt; Crosshair &gt; Share or Import Crosshair).</p>
       <input id="xhSetIn" placeholder="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx" autocomplete="off" spellcheck="false" aria-label="CS2 crosshair share code"><p id="xhSetMsg" class="muted"></p>
-      <div class="row"><button class="btn btn-small" id="xhSetNo">Cancel</button>${isAdmin() ? '<button class="btn btn-small" id="xhSetDel">Remove</button>' : ''}<button class="btn btn-primary btn-small" id="xhSetOk">Save</button></div>`);
+      <div class="row"><button class="btn btn-small" id="xhSetNo">Cancel</button><button class="btn btn-small" id="xhSetDel">Remove</button><button class="btn btn-primary btn-small" id="xhSetOk">Save</button></div>`);
     const msg = t => { const m = $('#xhSetMsg'); if (m) m.textContent = t; };
     $('#xhSetNo').onclick = closeModal;
     const apply = code => { if (lkv !== v) return; v.xh = code ? { state: 'ok', code, dec: xhDecode(code), src: 'saved' } : { state: 'na', canSet: true }; updPerf(); };
-    const put = async (method, code) => {   // admin: store on the Worker so every visitor sees it
-      const b = bridgeUrl(), tok = gsToken();
-      if (!b || !tok) throw new Error('Set the bridge URL and the ADMIN_TOKEN (Admin > Global Sync) first.');
-      const res = await fetchText(b + '/crosshair?id=' + v.id, { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: method === 'PUT' ? JSON.stringify({ code }) : undefined }, 15000);
-      if (res.status === 401) throw new Error('the Worker rejected the ADMIN_TOKEN');
-      if (res.status === 404) throw new Error('the Worker is still the old version: deploy the new worker.js');
-      let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
-      if (res.status !== 200 || !j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
-    };
+    const put = (method, code) => xhRemote(method, v.id, code);
     $('#xhSetOk').onclick = async () => {
       const code = (($('#xhSetIn').value || '').match(XH_RE) || [''])[0];
       if (!code) return msg('That is not a CS2 share code (CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx).');
       try {
-        if (isAdmin()) await put('PUT', code);
-        else { const mine = load(XH_MINE, {}) || {}; mine[v.id] = code; save(XH_MINE, mine); }
-        apply(code); closeModal(); toast('Crosshair saved.');
+        try { await put('PUT', code); toast('Crosshair published on the profile.'); }
+        catch (e) { if (isAdmin()) throw e; const mine = load(XH_MINE, {}) || {}; mine[v.id] = code; save(XH_MINE, mine); toast('Saved on this device only (' + e.message + ').'); }
+        apply(code); closeModal();
       } catch (e) { msg('Could not save: ' + e.message); }
     };
     const del = $('#xhSetDel');
@@ -2151,11 +2140,11 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const x = v.xh;
       const canSet = x.state === 'na' && x.canSet;
       xb.className = 'lk-xh' + (x.state === 'ok' ? '' : x.state === 'loading' ? ' loading' : canSet ? ' na set' : ' na');
-      xb.disabled = !(x.state === 'ok' || canSet); xb.innerHTML = xhSvg(x.state === 'ok' ? x.dec : null);
-      delete xb.dataset.xh; delete xb.dataset.xhset;
+      xb.disabled = x.state === 'loading'; xb.innerHTML = xhSvg(x.state === 'ok' ? x.dec : null);
+      delete xb.dataset.xh; delete xb.dataset.xhset; delete xb.dataset.xhna;
       if (x.state === 'ok') { xb.dataset.xh = x.code; xb.title = 'Click to copy this crosshair code, then import it in CS2 (Settings > Game > Crosshair > Import)' + (x.src ? ' (source: ' + x.src + ')' : ''); xb.setAttribute('aria-label', 'Copy crosshair code'); }
-      else if (canSet) { xb.dataset.xhset = '1'; xb.title = 'No crosshair code is stored for this player (Steam and Leetify do not publish one). Click to add it.'; xb.setAttribute('aria-label', 'Add crosshair code'); }
-      else xb.title = x.state === 'loading' ? 'Loading crosshair...' : 'No crosshair code available for this player (Steam and Leetify do not publish crosshair codes)';
+      else if (canSet) { xb.dataset.xhset = '1'; xb.title = 'No crosshair is published for you yet. Click to paste your share code and publish it on your profile.'; xb.setAttribute('aria-label', 'Add crosshair code'); }
+      else { if (x.state === 'na') xb.dataset.xhna = '1'; xb.title = x.state === 'loading' ? 'Loading crosshair...' : 'No crosshair has been published for this player yet.'; }
     }
   }
   /* banned friends: friend list (needs a public list + Steam key) -> GetPlayerBans in chunks of 100 */
@@ -2298,6 +2287,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   /* Valve's real Trust Factor is hidden, so this is an estimate from public signals only.
      Gentler than before: logarithmic / square-root curves so ordinary accounts are not punished, bans scale with recency. */
   function lkTrust(d) {
+    if (flOf(d.id)) return { score: 0, known: 3, f: [{ label: 'Flagged as a cheater by MWAY LABS', good: false, p: -100 }], tier: 'Cheater', col: '#d1556a' };
     const f = []; let s = 42, known = 0, capped = false;
     const add = (p, label, good) => { s += p; known++; f.push({ label, good, p }); };
     if (d.created) { const y = (Date.now() / 1000 - d.created) / 31557600, p = Math.min(20, Math.round(6 * Math.sqrt(Math.max(0, y)))); add(p, `Account age ${y.toFixed(1)}y`, p >= 8); }
@@ -2956,8 +2946,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const last = p.lastlogoff ? `Last online ${new Date(p.lastlogoff * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} (${agoText(Date.now() / 1000 - p.lastlogoff)})` : p.lastText ? `Last online ${p.lastText}` : '';
     return `<div class="lk-status"><span class="lk-on off"><i></i>Offline</span>${last ? `<span class="muted">${esc(last)}</span>` : ''}</div>`;
   }
-  /* Admin badge: shown next to the display name for these SteamID64s (icon: mnobk.png) */
-  const ADMIN_STEAM_IDS = ['76561199124341488', '76561198769479051'];
+  /* Admin badge: shown next to the display name for the admin SteamID64s (icon: mnobk.png) */
+  const cheaterBadge = id => { const f = flOf(id); return f ? `<span class="lk-cheater" title="${esc(f.note || 'Flagged as a cheater by MWAY LABS')}"><b>CHEATER</b></span>` : ''; };
   const adminBadge = id => ADMIN_STEAM_IDS.includes(String(id || '')) ? '<span class="lk-admin" title="MWAY LABS admin"><img src="mnobk.png" alt="" width="18" height="18" decoding="async"><b>ADMIN</b></span>' : '';
 
   function trustHTML(tr) {
@@ -3019,7 +3009,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
         : `<p class="muted">Leetify could not be reached after several attempts, so CS2 rank data is unavailable. <button type="button" class="btn btn-small" data-lk-retry="${esc(d.id)}">Retry</button></p>`}`;
 
     $('#lkOut').innerHTML = `<div class="lk-card">
-      <div class="lk-head">${avatar}<div class="lk-who"><div class="lk-namerow"><div class="steam-name">${esc(d.name || 'Unknown player')}</div>${adminBadge(d.id)}</div>
+      <div class="lk-head">${avatar}<div class="lk-who"><div class="lk-namerow"><div class="steam-name">${esc(d.name || 'Unknown player')}</div>${adminBadge(d.id)}${cheaterBadge(d.id)}</div>
         ${statusHTML(d)}
         <div class="muted">${esc(meta.join(' · '))}</div>
         ${flags.length ? `<div class="lk-flags">${flags.map(x => `<span class="lk-flag">${x}</span>`).join('')}</div>` : ''}
@@ -3046,6 +3036,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
 
   async function lkSearch(force) {
+    flLoad();
     const q = lkParse($('#lkIn').value), tok = ++lkTok, btn = $('#lkGo');
     $('#lkOut').innerHTML = ''; lkv = null;
     if (!q) return lkMsg('Enter a Steam profile link, SteamID64, SteamID2/3, account ID or custom name.', true);
@@ -3117,6 +3108,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const t = e.target, cp = t.closest('[data-cp]');
       if (cp) return toast(await copyText(cp.dataset.cp) ? 'Copied.' : 'Copy failed.');
       const xhs = t.closest('[data-xhset]'); if (xhs) return xhSetModal(lkv);
+      if (t.closest('[data-xhna]')) return toast('No crosshair is published for this player yet. Steam does not expose crosshair settings: players publish theirs after logging in with Steam (their own profile page, or the Crosshair Generator).');
       const xhb = t.closest('[data-xh]'); if (xhb) return toast(await copyText(xhb.dataset.xh) ? 'Crosshair code copied. In CS2: Settings > Game > Crosshair > Import.' : 'Copy failed.');
       if (t.closest('[data-cp-all]') && lkv) return toast(await copyText((lkv.ids || []).map(([l, x]) => l + ': ' + x).join('\n')) ? 'All IDs copied.' : 'Copy failed.');
       if (t.closest('[data-com-more]') && lkv) return comMore(lkv);
@@ -3552,7 +3544,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
      ===================================================================== */
   const GS_TOKEN_KEY = 'mway_admin_token', GS_DIRTY_KEY = 'mway_gs_dirty', GS_REV_KEY = 'mway_gs_rev';
   const GS_PRIVATE = ['key', 'proxy', 'bridge', 'floatKey', 'hltvKey', 'leetifyKey', 'faceitKey'];
-  const gsToken = () => { try { return (localStorage.getItem(GS_TOKEN_KEY) || '').trim(); } catch { return ''; } };
+  const gsStored = () => { try { return (localStorage.getItem(GS_TOKEN_KEY) || '').trim(); } catch { return ''; } };
+  const gsToken = () => gsStored() || (session && session.admin && session.tok) || '';
   const gsDirty = () => { try { return localStorage.getItem(GS_DIRTY_KEY) === '1'; } catch { return false; } };
   const gsSetDirty = on => { try { if (on) localStorage.setItem(GS_DIRTY_KEY, '1'); else localStorage.removeItem(GS_DIRTY_KEY); } catch { /* storage blocked */ } };
   const lsPut = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full: the in-memory copy still works */ } };
@@ -3567,6 +3560,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
   function gsPublicSettings() {
     const st = JSON.parse(JSON.stringify(settings)), c = st.steamCfg || {};
+    st.aboutText = about;
     // The HLTV endpoint is called from every visitor's browser, so it is public by nature; skip it if it looks like it carries a credential.
     const hltvUrl = /[?&](key|token|apikey|api_key|access_token)=/i.test(c.hltvUrl || '') ? '' : (c.hltvUrl || '');
     st.steamCfg = { accounts: c.accounts, last: c.last, cache: c.cache || {}, hltvUrl, bridgeOnly: c.bridgeOnly !== false };
@@ -3579,8 +3573,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (!isAdmin()) return;
     gsSetDirty(true);
     clearTimeout(GS.timer);
-    if (!bridgeUrl()) return gsStatus('Saved in this browser only. Set the Worker bridge URL to publish changes to visitors.', true);
-    if (!gsToken()) return gsStatus('Saved in this browser only. Enter the Worker ADMIN_TOKEN (Admin > Global Sync) to publish changes to visitors.', true);
+    const warn = () => { if (!GS.warned) { GS.warned = true; toast('Saved on this device only. Your change is NOT published to visitors yet: see Admin > Global Sync.'); } };
+    if (!bridgeUrl()) { warn(); return gsStatus('Saved in this browser only. Set the Worker bridge URL to publish changes to visitors.', true); }
+    if (!gsToken()) { warn(); return gsStatus('Saved in this browser only. Enter the Worker ADMIN_TOKEN (Admin > Global Sync) to publish changes to visitors.', true); }
     GS.timer = setTimeout(() => { gsPush(false); }, 600);
   }
   async function gsPush(manual, force) {
@@ -3623,6 +3618,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       GS_PRIVATE.forEach(k => { ns.steamCfg[k] = keep[k] !== undefined ? keep[k] : DS.steamCfg[k]; });
       if (!ns.steamCfg.hltvUrl) ns.steamCfg.hltvUrl = keep.hltvUrl || '';
       settings = ns; lsPut('mway_settings', settings);
+      if (typeof ns.aboutText === 'string' && ns.aboutText) { about = ns.aboutText; lsPut('mway_about', about); }
     }
     GS.rev = j.rev || 0; try { localStorage.setItem(GS_REV_KEY, String(GS.rev)); } catch { /* ignore */ }
     applyAuth();
@@ -3680,7 +3676,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const v = $('#gsToken').value.trim();
       try { if (v) localStorage.setItem(GS_TOKEN_KEY, v); else localStorage.removeItem(GS_TOKEN_KEY); } catch { /* storage blocked */ }
       if (!isAdmin()) return;
-      if (!bridgeUrl() || !v) return gsStatus(gsIdleMsg(), true);
+      if (!bridgeUrl() || !gsToken()) return gsStatus(gsIdleMsg(), true);
       const ok = await gsPush(true);
       if (ok) { toast('Published to all visitors.'); keysPush(false); }
     });
@@ -3701,28 +3697,48 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   }
 
   /* =====================================================================
-     12h. CS2 UTILITIES (beta): lineup map. Everyone can browse maps and markers; only Steam-logged-in users can add markers.
-     Markers are shared through the Worker (GET/POST /markers). Without a reachable Worker they stay in this browser only.
-     Radar images are optional: drop maps/<id>.png next to index.html (mirage, inferno, dust2, nuke, overpass, ancient, anubis, vertigo, train).
+     12h. CS2 UTILITIES (beta): lineup map on Valve's official radar overviews.
+     Everyone can browse public lineups. Steam-logged-in users can add lineups (Discord or YouTube video), choose pin colour / pin size /
+     landing circle / throw position, post them globally or keep them private, invite collaborators and rate other people's lineups.
+     Admins can remove any lineup. Shared data lives on the Worker (/markers); without a reachable Worker lineups stay in this browser.
+     Radars: maps/<map>[_lower].png, with the same official files on GitHub as fallback.
      ===================================================================== */
   const UT_MAPS = [['mirage', 'Mirage'], ['inferno', 'Inferno'], ['dust2', 'Dust II'], ['nuke', 'Nuke'], ['overpass', 'Overpass'], ['ancient', 'Ancient'], ['anubis', 'Anubis'], ['vertigo', 'Vertigo'], ['train', 'Train']];
+  const UT_LOWER = ['nuke', 'vertigo', 'train'];
   const UT_TYPES = { smoke: ['Smoke', '#9db4d6'], flash: ['Flash', '#f2d65b'], molly: ['Molotov', '#ff7a45'], he: ['HE', '#7ddf8a'], other: ['Other', '#c58bff'] };
-  const UT_HOST = /^(cdn\.discordapp\.com|media\.discordapp\.net|(www\.)?discord(app)?\.com|discord\.gg)$/i;
+  const UT_SIDES = [['both', 'Both sides'], ['t', 'T side'], ['ct', 'CT side']];
+  const UT_TECH = [['stand', 'Standing'], ['jump', 'Jump throw'], ['run', 'Running'], ['runjump', 'Run + jump'], ['walk', 'Walking']];
+  const UT_COLORS = ['#9db4d6', '#f2d65b', '#ff7a45', '#7ddf8a', '#c58bff', '#ff5c8a', '#4fd6e0', '#ffffff'];
+  const UT_HOST = /^(cdn\.discordapp\.com|media\.discordapp\.net|(www\.)?discord(app)?\.com|discord\.gg|(www\.|m\.)?youtube\.com|youtu\.be)$/i;
   const UT_LOCAL = 'mway_markers';
-  const UT = { map: 'mirage', type: 'all', data: load(UT_LOCAL, {}), sel: '', draft: null, place: false, remote: false, ready: false, loading: false, msg: '' };
+  const UT = { map: 'mirage', lvl: 0, type: 'all', side: 'all', sort: 'top', mine: false, data: load(UT_LOCAL, {}), sel: '', draft: null, place: false, from: false, remote: false, ready: false, loading: false, at: 0 };
   const utCan = () => !!(session && session.steam);
-  const utList = () => (UT.data[UT.map] || []).filter(m => UT.type === 'all' || m.type === UT.type);
+  const utMember = m => !!(session && session.steam && (m.by === session.id || (m.collab || []).includes(session.id)));
   const utName = id => (UT_MAPS.find(m => m[0] === id) || [id, id])[1];
+  const utCol = m => /^#[0-9a-f]{6}$/i.test(m.color || '') ? m.color : (UT_TYPES[m.type] || UT_TYPES.other)[1];
+  function utList() {
+    const l = (UT.data[UT.map] || []).filter(m => (m.lvl || 0) === UT.lvl && (UT.type === 'all' || m.type === UT.type) && (UT.side === 'all' || (m.side || 'both') === UT.side || (m.side || 'both') === 'both') && (!UT.mine || utMember(m)));
+    return l.sort(UT.sort === 'new' ? (a, b) => b.ts - a.ts : (a, b) => (b.avg || 0) - (a.avg || 0) || (b.n || 0) - (a.n || 0) || b.ts - a.ts);
+  }
   function utUrl(raw) {
     try { const u = new URL(String(raw || '').trim()); return u.protocol === 'https:' && UT_HOST.test(u.hostname) ? u.href : ''; } catch { return ''; }
   }
-  const utIsVideo = u => { try { const p = new URL(u); return /^(cdn\.discordapp\.com|media\.discordapp\.net)$/i.test(p.hostname) && /\.(mp4|webm|mov)$/i.test(p.pathname); } catch { return false; } };
-  function utSay(msg, bad) { UT.msg = msg || ''; const el = $('#utMsg'); if (el) { el.textContent = UT.msg; el.style.color = bad ? 'var(--danger)' : ''; } }
-  async function utApi(body, admin) {
+  function utMedia(u) {
+    try {
+      const p = new URL(u), h = p.hostname.replace(/^(www\.|m\.)/i, '').toLowerCase(); let id = '';
+      if (h === 'youtu.be') id = p.pathname.slice(1).split('/')[0];
+      else if (h === 'youtube.com') id = p.searchParams.get('v') || (p.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{11})/) || [])[1] || '';
+      if (/^[\w-]{11}$/.test(id)) return { yt: id };
+      if (/^(cdn\.discordapp\.com|media\.discordapp\.net)$/.test(h) && /\.(mp4|webm|mov)$/i.test(p.pathname)) return { video: true };
+    } catch { /* invalid */ }
+    return {};
+  }
+  const utStars = (avg, n) => n ? `<span class="ut-stars" title="${avg.toFixed(1)} of 5 from ${n} rating${n === 1 ? '' : 's'}">&#9733; ${avg.toFixed(1)} <small>(${n})</small></span>` : '<span class="ut-stars none">unrated</span>';
+  function utSay(msg, bad) { const el = $('#utMsg'); if (el) { el.textContent = msg || ''; el.style.color = bad ? 'var(--danger)' : ''; } }
+  async function utApi(body) {
     const b = bridgeUrl(); if (!b) throw new Error('no bridge');
-    const h = { 'Content-Type': 'application/json' };
-    if (admin) h['X-Mway-Token'] = gsToken(); else if (session && session.tok) h.Authorization = 'Bearer ' + session.tok;
-    const res = await fetchText(b + '/markers', { method: 'POST', headers: h, body: JSON.stringify(body) }, 12000);
+    const tok = (session && session.tok) || gsToken();
+    const res = await fetchText(b + '/markers', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }, 12000);
     let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
     if (res.status === 200 && j && j.ok) return j;
     const e = new Error((j && j.error) || 'HTTP ' + res.status); e.status = res.status; throw e;
@@ -3731,126 +3747,307 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     if (UT.loading) return; UT.loading = true;
     try {
       const b = bridgeUrl(); if (!b) throw new Error('no bridge');
-      const res = await fetchText(b + '/markers', {}, 10000);
-      const j = JSON.parse(res.text);
+      const tok = session && session.tok, res = await fetchText(b + '/markers', tok ? { headers: { Authorization: 'Bearer ' + tok } } : {}, 10000), j = JSON.parse(res.text);
       if (res.status !== 200 || !j || !j.ok || typeof j.markers !== 'object') throw new Error('unavailable');
-      UT.data = j.markers; UT.remote = true; lsPut(UT_LOCAL, UT.data);
-      utSay('');
-    } catch { UT.remote = false; utSay('Shared markers are offline. Showing and saving markers on this device only.'); }
-    finally { UT.loading = false; UT.ready = true; utDraw(); }
+      UT.data = j.markers; UT.remote = true; lsPut(UT_LOCAL, UT.data); utSay('');
+    } catch { UT.remote = false; utSay('Shared lineups are offline (Worker not reachable or not updated). Showing and saving lineups on this device only.'); }
+    finally { UT.loading = false; UT.ready = true; UT.at = Date.now(); if (!UT.draft) utDraw(); }
   }
-  function utEnter() {
-    utDraw();
-    if (!UT.ready) utLoad(); else if (Date.now() - (UT.at || 0) > 20000) { UT.at = Date.now(); utLoad(); }
-    UT.at = UT.at || Date.now();
-  }
-  function utRefresh() { if ($('#utPanel') && tab3Sub === 'utilities' && $('#tab3').classList.contains('active')) utDraw(); else utToolbar(); }
+  function utEnter() { utDraw(); if (!UT.ready || Date.now() - UT.at > 20000) utLoad(); }
+  function utRefresh() { if (tab3Sub === 'utilities' && $('#tab3').classList.contains('active')) { UT.ready = false; utEnter(); } else utToolbar(); }
   function utToolbar() {
     const can = utCan(), pl = $('#utPlace');
     pl.disabled = !can; pl.classList.toggle('on', UT.place && can); pl.setAttribute('aria-pressed', String(UT.place && can));
-    pl.textContent = UT.place && can ? 'Click the map...' : '+ Add marker';
-    pl.title = can ? 'Click, then click a spot on the map' : 'Log in with Steam to add markers';
-    $('#utIntro').textContent = can ? 'Pick a map, press Add marker, click a spot and attach a Discord video link of the lineup.'
-      : 'Browse lineup markers for every map. Log in with Steam to add your own: markers need a Discord-linked video.';
-    $('#utBoard').classList.toggle('placing', UT.place && can);
+    pl.textContent = UT.place && can ? 'Click the map...' : '+ Add lineup';
+    pl.title = can ? 'Press, then click the landing spot on the map' : 'Log in with Steam to add lineups';
+    $('#utIntro').textContent = can ? 'Press Add lineup, click where the grenade lands, then set colour, size, throw position and a Discord or YouTube video. Post it globally or keep it private.'
+      : 'Official CS2 radar maps with community lineups. Log in with Steam to add your own and rate other players\' lineups.';
+    $('#utBoard').classList.toggle('placing', (UT.place || UT.from) && can);
+    $('#utMine').classList.toggle('hidden', !can); $('#utMine').classList.toggle('on', UT.mine);
+  }
+  function utImg() {
+    const img = $('#utImg'), key = UT.map + ':' + UT.lvl;
+    if (img.dataset.key === key) return;
+    img.dataset.key = key; img.dataset.n = '0'; img.classList.add('hidden'); $('#utFallback').classList.remove('hidden');
+    const low = UT.lvl ? '_lower' : '', srcs = ['maps/' + UT.map + low + '.png', 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/radars/de_' + UT.map + low + '_radar_psd.png'];
+    img.onload = () => { img.classList.remove('hidden'); $('#utFallback').classList.add('hidden'); };
+    img.onerror = () => { const n = +img.dataset.n + 1; img.dataset.n = String(n); if (n < srcs.length) img.src = srcs[n]; else { img.classList.add('hidden'); $('#utFallback').classList.remove('hidden'); } };
+    img.src = srcs[0];
+  }
+  function utPins() {
+    const list = utList(), d = UT.draft, sel = (UT.data[UT.map] || []).find(x => x.id === UT.sel);
+    const pct = v => (v * 100).toFixed(2) + '%', area = m => m.area > 0 ? `<span class="ut-area" style="left:${pct(m.x)};top:${pct(m.y)};width:${m.area * 2}%;height:${m.area * 2}%;--c:${utCol(m)}"></span>` : '';
+    const lineOf = m => m.fx != null ? `<line x1="${m.fx * 100}" y1="${m.fy * 100}" x2="${m.x * 100}" y2="${m.y * 100}" stroke="${utCol(m)}" stroke-width=".5" stroke-dasharray="1.6 1.2"/>` : '';
+    const fromOf = m => m.fx != null ? `<span class="ut-from" style="left:${pct(m.fx)};top:${pct(m.fy)};--c:${utCol(m)}" title="Throw from here"></span>` : '';
+    const shown = d ? [d] : sel && list.includes(sel) ? [sel] : [];
+    $('#utLines').innerHTML = shown.map(lineOf).join('');
+    $('#utPins').innerHTML = list.filter(m => !d || m.id !== d.id).map(area).join('') + (d ? area(d) : '')
+      + shown.map(fromOf).join('')
+      + list.filter(m => !d || m.id !== d.id).map((m, i) => `<button type="button" class="ut-pin${m.id === UT.sel ? ' sel' : ''}${m.vis === 'private' ? ' priv' : ''}" data-id="${esc(m.id)}" style="left:${pct(m.x)};top:${pct(m.y)};--c:${utCol(m)};--s:${m.size || 26}px" aria-label="${esc(m.title)}"><span>${i + 1}</span></button>`).join('')
+      + (d ? `<span class="ut-pin draft" style="left:${pct(d.x)};top:${pct(d.y)};--c:${d.color};--s:${d.size}px"><span>+</span></span>` : '');
+    $('#utCount').textContent = list.length + ' lineup' + (list.length === 1 ? '' : 's') + ' on ' + utName(UT.map);
   }
   function utDraw() {
     $('#utMaps').innerHTML = UT_MAPS.map(([id, n]) => `<button type="button" class="ut-map${id === UT.map ? ' on' : ''}" role="tab" aria-selected="${id === UT.map}" data-map="${id}">${esc(n)}<i>${(UT.data[id] || []).length || ''}</i></button>`).join('');
-    $('#utTypes').innerHTML = [['all', 'All', '#8fb2ff']].concat(Object.entries(UT_TYPES).map(([k, v]) => [k, v[0], v[1]]))
-      .map(([k, n, c]) => `<button type="button" class="ut-chip${UT.type === k ? ' on' : ''}" data-type="${k}" style="--c:${c}" aria-pressed="${UT.type === k}">${esc(n)}</button>`).join('');
-    const img = $('#utImg'), src = 'maps/' + UT.map + '.png';
-    if (img.dataset.map !== UT.map) {
-      img.dataset.map = UT.map; img.classList.add('hidden'); $('#utFallback').classList.remove('hidden');
-      img.onload = () => { img.classList.remove('hidden'); $('#utFallback').classList.add('hidden'); };
-      img.onerror = () => { img.classList.add('hidden'); $('#utFallback').classList.remove('hidden'); };
-      img.src = src;
-    }
-    $('#utFbName').textContent = utName(UT.map).toUpperCase();
-    $('#utFbHint').textContent = 'Add a radar image at ' + src + ' for the full overview';
-    const list = utList();
-    $('#utPins').innerHTML = list.map((m, i) => `<button type="button" class="ut-pin${m.id === UT.sel ? ' sel' : ''}" data-id="${esc(m.id)}" style="left:${(m.x * 100).toFixed(2)}%;top:${(m.y * 100).toFixed(2)}%;--c:${(UT_TYPES[m.type] || UT_TYPES.other)[1]}" aria-label="${esc(m.title)}"><span>${i + 1}</span></button>`).join('')
-      + (UT.draft ? `<span class="ut-pin draft" style="left:${(UT.draft.x * 100).toFixed(2)}%;top:${(UT.draft.y * 100).toFixed(2)}%;--c:#fff"><span>+</span></span>` : '');
-    $('#utCount').textContent = list.length + ' marker' + (list.length === 1 ? '' : 's') + ' on ' + utName(UT.map);
-    utToolbar(); utSide();
+    const chip = (k, v, n, c, on) => `<button type="button" class="ut-chip${on ? ' on' : ''}" data-${k}="${v}" style="--c:${c}" aria-pressed="${on}">${esc(n)}</button>`;
+    $('#utTypes').innerHTML = chip('type', 'all', 'All', '#8fb2ff', UT.type === 'all') + Object.entries(UT_TYPES).map(([k, v]) => chip('type', k, v[0], v[1], UT.type === k)).join('')
+      + '<span class="ut-sep"></span>' + [['all', 'Any side']].concat(UT_SIDES.slice(1)).map(([k, n]) => chip('side', k, n, '#8fb2ff', UT.side === k)).join('');
+    $('#utSort').value = UT.sort;
+    const hasLow = UT_LOWER.includes(UT.map); if (!hasLow) UT.lvl = 0;
+    const lv = $('#utLvl'); lv.classList.toggle('hidden', !hasLow);
+    lv.innerHTML = hasLow ? [[0, 'Upper'], [1, 'Lower']].map(([k, n]) => chip('lvl', k, n, '#8fb2ff', UT.lvl === k)).join('') : '';
+    utImg(); $('#utFbName').textContent = utName(UT.map).toUpperCase(); $('#utFbHint').textContent = 'Radar image could not be loaded';
+    utPins(); utToolbar(); utSide();
+  }
+  const utSel = (arr, cur) => arr.map(([k, n]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  const utChips = d => (d.collab || []).map(id => `<span class="ut-cchip">${esc(id)}<button type="button" data-cdel="${esc(id)}" aria-label="Remove collaborator">&times;</button></span>`).join('') || '<span class="muted">No collaborators yet.</span>';
+  function utForm() {
+    const d = UT.draft, owner = !d.id || d.by === session.id, shared = UT.remote;
+    return `<h3>${d.id ? 'Edit lineup' : 'New lineup'}</h3>
+      <span class="flabel">Title</span><input data-f="title" maxlength="40" value="${esc(d.title)}" placeholder="e.g. A site smoke from T spawn" autocomplete="off">
+      <div class="ut-two"><div><span class="flabel">Type</span><select data-f="type">${utSel(Object.entries(UT_TYPES).map(([k, v]) => [k, v[0]]), d.type)}</select></div><div><span class="flabel">Side</span><select data-f="side">${utSel(UT_SIDES, d.side)}</select></div></div>
+      <span class="flabel">Technique</span><select data-f="tech">${utSel(UT_TECH, d.tech)}</select>
+      <span class="flabel">Pin colour</span><div class="ut-sw">${UT_COLORS.map(c => `<button type="button" class="ut-swb${d.color === c ? ' on' : ''}" data-col="${c}" style="background:${c}" aria-label="Colour ${c}"></button>`).join('')}<input type="color" data-f="color" value="${d.color}" aria-label="Custom colour"></div>
+      <span class="flabel">Pin size <b id="utVSize">${d.size}px</b></span><input type="range" data-f="size" min="14" max="44" value="${d.size}">
+      <span class="flabel">Landing circle <b id="utVArea">${d.area ? d.area + '%' : 'off'}</b></span><input type="range" data-f="area" min="0" max="12" step="0.5" value="${d.area}">
+      <div class="row"><button id="utFromBtn" type="button" class="btn btn-small${UT.from ? ' on' : ''}">${d.fx != null ? 'Move throw position' : 'Set throw position'}</button>${d.fx != null ? '<button id="utFromClr" type="button" class="btn btn-small">Clear</button>' : ''}</div>
+      <span class="flabel">Video link (Discord or YouTube)</span><input data-f="url" value="${esc(d.url)}" placeholder="https://youtu.be/... or https://cdn.discordapp.com/..." autocomplete="off" spellcheck="false">
+      <span class="flabel">Note (optional)</span><textarea data-f="note" rows="2" maxlength="140" placeholder="Where to stand, which jump or click">${esc(d.note)}</textarea>
+      <span class="flabel">Who can see it</span>
+      <div class="ut-vis"><label><input type="radio" name="utvis" data-f="vis" value="public"${d.vis === 'public' ? ' checked' : ''}> <b>Global</b> everyone on the site</label>
+      <label><input type="radio" name="utvis" data-f="vis" value="private"${d.vis === 'private' ? ' checked' : ''}> <b>Private</b> only you${shared ? ' and your collaborators' : ''}</label></div>
+      ${shared && owner ? `<span class="flabel">Collaborators (max 5)</span><div id="utColl" class="ut-cl">${utChips(d)}</div><div class="row"><input id="utCollIn" placeholder="Steam profile URL or SteamID64" autocomplete="off"><button id="utCollAdd" type="button" class="btn btn-small">Add</button></div>
+      <p class="muted">Collaborators can edit this lineup and switch it between private and global.</p>` : ''}
+      ${!shared ? '<p class="muted">Offline mode: this lineup is saved on this device only (no collaborators or ratings).</p>' : ''}
+      <div class="row"><button id="utSave" type="button" class="btn btn-primary btn-small">${d.id ? 'Save changes' : 'Save lineup'}</button><button id="utCancel" type="button" class="btn btn-small">Cancel</button></div>`;
   }
   function utSide() {
     const el = $('#utSide'), m = (UT.data[UT.map] || []).find(x => x.id === UT.sel);
-    if (UT.draft && utCan()) {
-      el.innerHTML = `<h3>New marker</h3><span class="flabel">Title</span><input id="utTitle" maxlength="40" placeholder="e.g. A site smoke from T spawn" autocomplete="off">
-        <span class="flabel mt-s">Type</span><select id="utType">${Object.entries(UT_TYPES).map(([k, v]) => `<option value="${k}">${esc(v[0])}</option>`).join('')}</select>
-        <span class="flabel mt-s">Discord video link</span><input id="utUrl" placeholder="https://cdn.discordapp.com/attachments/..." autocomplete="off" spellcheck="false">
-        <span class="flabel mt-s">Note (optional)</span><textarea id="utNote" rows="2" maxlength="140" placeholder="Where to stand, which jump or click"></textarea>
-        <div class="row"><button id="utSave" type="button" class="btn btn-primary btn-small">Save marker</button><button id="utCancel" type="button" class="btn btn-small">Cancel</button></div>
-        <p class="muted">Links must come from Discord (cdn.discordapp.com, media.discordapp.net, discord.com or discord.gg).</p>`;
-      return;
-    }
+    if (UT.draft && utCan()) { if (!el.querySelector('[data-f="title"]')) el.innerHTML = utForm(); return; }
     if (m) {
-      const t = UT_TYPES[m.type] || UT_TYPES.other, v = utUrl(m.url), mine = utCan() && session.id === m.by, del = mine || isAdmin();
-      el.innerHTML = `<button id="utBack" type="button" class="btn btn-small">&larr; All markers</button>
-        <h3>${esc(m.title)}</h3><div class="ut-meta"><span class="ut-tag" style="--c:${t[1]}">${esc(t[0])}</span><span class="muted">by ${esc(m.name || m.by)} &middot; ${esc(new Date(m.ts).toISOString().slice(0, 10))}</span></div>
+      const t = UT_TYPES[m.type] || UT_TYPES.other, v = utUrl(m.url), md = v ? utMedia(v) : {}, mem = utMember(m), own = utCan() && session.id === m.by, adm = isAdmin();
+      const side = (UT_SIDES.find(x => x[0] === (m.side || 'both')) || [, 'Both sides'])[1], tech = (UT_TECH.find(x => x[0] === (m.tech || 'stand')) || [, 'Standing'])[1];
+      const rate = UT.remote && utCan() && !mem ? `<div class="ut-rate" role="group" aria-label="Rate this lineup"><span class="muted">Your rating</span>${[1, 2, 3, 4, 5].map(n => `<button type="button" class="${n <= (m.mine || 0) ? 'on' : ''}" data-rate="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">&#9733;</button>`).join('')}${m.mine ? '<button type="button" class="ut-rclr" data-rate="0">clear</button>' : ''}</div>`
+        : UT.remote && !utCan() ? '<p class="muted">Log in with Steam to rate this lineup.</p>' : '';
+      el.innerHTML = `<button id="utBack" type="button" class="btn btn-small">&larr; All lineups</button>
+        <h3>${esc(m.title)}</h3><div class="ut-meta"><span class="ut-tag" style="--c:${t[1]}">${esc(t[0])}</span><span class="ut-tag" style="--c:#8fb2ff">${esc(side)}</span><span class="ut-tag" style="--c:#8fb2ff">${esc(tech)}</span>${m.vis === 'private' ? '<span class="ut-tag" style="--c:#ffb454">PRIVATE</span>' : ''}</div>
+        <div class="ut-meta">${utStars(m.avg || 0, m.n || 0)}<span class="muted">by ${esc(m.name || m.by)} &middot; ${esc(new Date(m.ts).toISOString().slice(0, 10))}</span></div>
+        ${(m.collab || []).length ? `<p class="muted">With ${(m.collab || []).map(c => `<a href="#/gaming/account" data-lk="${esc(c)}">${esc(c)}</a>`).join(', ')}</p>` : ''}
         ${m.note ? `<p>${esc(m.note)}</p>` : ''}
-        ${v && utIsVideo(v) ? `<video class="ut-video" controls preload="metadata" src="${esc(v)}"></video>` : ''}
-        ${v ? `<a class="btn btn-primary btn-small" href="${esc(v)}" target="_blank" rel="noopener noreferrer">Open lineup video</a>` : '<p class="muted">No valid video link.</p>'}
-        ${del ? '<button id="utDel" type="button" class="btn btn-small btn-danger">Delete marker</button>' : ''}`;
+        ${md.yt ? `<iframe class="ut-video" src="https://www.youtube-nocookie.com/embed/${esc(md.yt)}" title="Lineup video" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>` : ''}
+        ${md.video ? `<video class="ut-video" controls preload="metadata" src="${esc(v)}"></video>` : ''}
+        ${v ? `<a class="btn btn-primary btn-small" href="${esc(v)}" target="_blank" rel="noopener noreferrer">Open video in a new tab</a>` : '<p class="muted">No valid video link.</p>'}
+        ${rate}
+        <div class="row">${mem ? '<button id="utEdit" type="button" class="btn btn-small">Edit</button>' : ''}${mem ? `<button id="utVis" type="button" class="btn btn-small">${m.vis === 'private' ? 'Make global' : 'Make private'}</button>` : ''}
+        ${utCan() && !own && mem ? '<button id="utLeave" type="button" class="btn btn-small">Leave collab</button>' : ''}
+        ${own || adm ? `<button id="utDel" type="button" class="btn btn-small btn-danger">${own ? 'Delete' : 'Remove (admin)'}</button>` : ''}</div>`;
       return;
     }
     const list = utList();
-    el.innerHTML = `<h3>${esc(utName(UT.map))} lineups</h3>` + (list.length ? `<ul class="ut-list">${list.map((x, i) => `<li><button type="button" data-id="${esc(x.id)}"><b style="--c:${(UT_TYPES[x.type] || UT_TYPES.other)[1]}">${i + 1}</b><span>${esc(x.title)}</span></button></li>`).join('')}</ul>`
-      : '<p class="muted">No markers here yet.' + (utCan() ? ' Press Add marker to create the first one.' : ' Log in with Steam to add one.') + '</p>');
+    el.innerHTML = `<h3>${esc(utName(UT.map))} lineups</h3>` + (list.length ? `<ul class="ut-list">${list.map((x, i) => `<li><button type="button" data-id="${esc(x.id)}"><b style="--c:${utCol(x)}">${i + 1}</b><span class="ut-lt">${esc(x.title)}${x.vis === 'private' ? ' <em>private</em>' : ''}</span>${x.n ? `<small>&#9733; ${x.avg.toFixed(1)}</small>` : ''}</button></li>`).join('')}</ul>`
+      : '<p class="muted">No lineups here yet.' + (utCan() ? ' Press Add lineup to create the first one.' : ' Log in with Steam to add one.') + '</p>');
   }
+  const utBlank = (x, y) => ({ x, y, fx: null, fy: null, type: 'smoke', side: 'both', tech: 'stand', color: UT_TYPES.smoke[1], size: 26, area: 0, title: '', url: '', note: '', vis: 'public', collab: [], lvl: UT.lvl });
   function utStore(map, list) { UT.data[map] = list; lsPut(UT_LOCAL, UT.data); }
   async function utSave() {
-    if (!utCan() || !UT.draft) return;
-    const title = $('#utTitle').value.trim(), url = utUrl($('#utUrl').value);
-    if (!title) return toast('Give the marker a title.');
-    if (!url) return toast('Use an https Discord video link (cdn.discordapp.com, media.discordapp.net, discord.com or discord.gg).');
-    const m = { map: UT.map, x: +UT.draft.x.toFixed(4), y: +UT.draft.y.toFixed(4), type: $('#utType').value, title, url, note: $('#utNote').value.trim(), name: String(session.name || session.id).slice(0, 32) };
-    const btn = $('#utSave'); btn.disabled = true;
+    const d = UT.draft; if (!utCan() || !d) return;
+    d.url = utUrl(d.url) || d.url; const title = String(d.title || '').trim();
+    if (!title) return toast('Give the lineup a title.');
+    if (!utUrl(d.url)) return toast('Use an https video link from YouTube or Discord.');
+    const payload = Object.assign({}, d, { title, map: UT.map, name: String(session.name || session.id).slice(0, 32) });
+    $('#utSave').disabled = true;
     try {
-      if (UT.remote) {
-        const j = await utApi({ op: 'add', marker: m }); utStore(UT.map, (UT.data[UT.map] || []).concat(j.marker)); UT.sel = j.marker.id;
-        toast('Marker saved for everyone.');
-      } else {
-        const loc = Object.assign({ id: 'l' + Date.now().toString(36), by: session.id, ts: Date.now() }, m); utStore(UT.map, (UT.data[UT.map] || []).concat(loc)); UT.sel = loc.id;
-        toast('Marker saved on this device only.');
-      }
-      UT.draft = null; UT.place = false;
-    } catch (e) {
-      toast(e.status === 401 ? 'Your Steam session has no write permission. Log out and log in with Steam again.' : 'Could not save: ' + e.message);
-    }
+      let m;
+      if (UT.remote) m = (await utApi(d.id ? { op: 'edit', id: d.id, marker: payload } : { op: 'add', marker: payload })).marker;
+      else m = d.id ? Object.assign({}, d, payload, { upd: Date.now() }) : Object.assign({}, payload, { id: 'l' + Date.now().toString(36), by: session.id, ts: Date.now(), avg: 0, n: 0 });
+      const list = (UT.data[UT.map] || []).filter(x => x.id !== m.id); utStore(UT.map, list.concat(m)); UT.sel = m.id;
+      toast(d.id ? 'Lineup updated.' : UT.remote ? (m.vis === 'private' ? 'Saved privately.' : 'Lineup posted globally.') : 'Lineup saved on this device only.');
+      UT.draft = null; UT.place = false; UT.from = false; $('#utSide').innerHTML = '';
+    } catch (e) { toast(e.status === 401 ? 'Your Steam session has no write permission. Log out and log in with Steam again.' : 'Could not save: ' + e.message); $('#utSave') && ($('#utSave').disabled = false); return; }
     utDraw();
   }
-  async function utDelete() {
-    const list = UT.data[UT.map] || [], m = list.find(x => x.id === UT.sel); if (!m) return;
+  async function utAct(op, extra, okMsg) {
+    const m = (UT.data[UT.map] || []).find(x => x.id === UT.sel); if (!m) return;
     try {
-      if (UT.remote && m.id[0] !== 'l') await utApi({ op: 'del', id: m.id }, !(utCan() && session.id === m.by));
-      utStore(UT.map, list.filter(x => x.id !== m.id)); UT.sel = ''; toast('Marker deleted.');
-    } catch (e) { toast('Could not delete: ' + e.message); }
+      if (UT.remote && m.id[0] !== 'l') {
+        const j = await utApi(Object.assign({ op, id: m.id }, extra || {}));
+        if (j.marker) utStore(UT.map, (UT.data[UT.map] || []).map(x => x.id === m.id ? j.marker : x));
+        else utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id));
+      } else if (op === 'del') utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id));
+      else if (op === 'edit') utStore(UT.map, (UT.data[UT.map] || []).map(x => x.id === m.id ? Object.assign({}, x, extra.marker) : x));
+      if (op === 'del' || op === 'leave') UT.sel = '';
+      if (okMsg) toast(okMsg);
+    } catch (e) { toast('Could not do that: ' + e.message); }
     utDraw();
+  }
+  function utDraftSet(el) {
+    const f = el.dataset.f, d = UT.draft; if (!f || !d) return;
+    d[f] = el.type === 'range' ? +el.value : el.value;
+    if (f === 'size') $('#utVSize').textContent = d.size + 'px';
+    if (f === 'area') $('#utVArea').textContent = d.area ? d.area + '%' : 'off';
+    if (f === 'color') $$('#utSide .ut-swb').forEach(b => b.classList.toggle('on', b.dataset.col === d.color));
+    if (['size', 'area', 'color'].includes(f)) utPins();
+  }
+  async function utAddCollab() {
+    const d = UT.draft, inp = $('#utCollIn'); if (!d || !inp.value.trim()) return;
+    if ((d.collab || []).length >= 5) return toast('Up to 5 collaborators.');
+    try {
+      const p = lkParse(inp.value); if (!p || p.err) throw new Error('not a Steam profile or ID');
+      const id = p.id || await lkResolve(p.vanity); if (!id) throw new Error('profile not found');
+      if (id === session.id) throw new Error('that is you');
+      d.collab = [...new Set((d.collab || []).concat(id))]; inp.value = ''; $('#utColl').innerHTML = utChips(d);
+    } catch (e) { toast('Could not add collaborator: ' + e.message); }
   }
   function utInit() {
-    $('#utMaps').addEventListener('click', e => { const b = e.target.closest('[data-map]'); if (!b) return; UT.map = b.dataset.map; UT.sel = ''; UT.draft = null; utDraw(); });
-    $('#utTypes').addEventListener('click', e => { const b = e.target.closest('[data-type]'); if (!b) return; UT.type = b.dataset.type; UT.sel = ''; utDraw(); });
-    $('#utPlace').addEventListener('click', () => { if (!utCan()) return toast('Log in with Steam to add markers.'); UT.place = !UT.place; UT.draft = null; UT.sel = ''; utDraw(); });
+    $('#utMaps').addEventListener('click', e => { const b = e.target.closest('[data-map]'); if (!b || UT.draft) return; UT.map = b.dataset.map; UT.lvl = 0; UT.sel = ''; utDraw(); });
+    $('#utTypes').addEventListener('click', e => { const t = e.target.closest('[data-type]'), s = e.target.closest('[data-side]'); if (t) UT.type = t.dataset.type; else if (s) UT.side = s.dataset.side; else return; UT.sel = ''; utDraw(); });
+    $('#utLvl').addEventListener('click', e => { const b = e.target.closest('[data-lvl]'); if (!b || UT.draft) return; UT.lvl = +b.dataset.lvl; UT.sel = ''; utDraw(); });
+    $('#utSort').addEventListener('change', e => { UT.sort = e.target.value; utDraw(); });
+    $('#utMine').addEventListener('click', () => { UT.mine = !UT.mine; UT.sel = ''; utDraw(); });
+    $('#utPlace').addEventListener('click', () => {
+      if (!utCan()) return toast('Log in with Steam to add lineups.');
+      UT.place = !UT.place; UT.draft = null; UT.sel = ''; UT.from = false; $('#utSide').innerHTML = ''; utDraw();
+    });
     $('#utBoard').addEventListener('click', e => {
       const pin = e.target.closest('.ut-pin[data-id]');
-      if (pin) { UT.sel = pin.dataset.id; UT.draft = null; UT.place = false; return utDraw(); }
-      if (!UT.place || !utCan()) return;
-      const r = $('#utBoard').getBoundingClientRect();
-      UT.draft = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; UT.sel = '';
-      utDraw(); const t = $('#utTitle'); if (t) t.focus();
+      if (pin && !UT.draft) { UT.sel = pin.dataset.id; UT.place = false; return utDraw(); }
+      if (!utCan()) return;
+      const r = $('#utBoard').getBoundingClientRect(), x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+      if (UT.from && UT.draft) { UT.draft.fx = +x.toFixed(4); UT.draft.fy = +y.toFixed(4); UT.from = false; $('#utSide').innerHTML = ''; return utDraw(); }
+      if (UT.draft && UT.draft.id) return;
+      if (UT.place) { UT.draft = Object.assign(UT.draft || utBlank(0, 0), { x: +x.toFixed(4), y: +y.toFixed(4) }); UT.sel = ''; utDraw(); const t = $('#utSide [data-f="title"]'); if (t) t.focus(); }
     });
-    $('#utSide').addEventListener('click', e => {
-      const t = e.target;
-      if (t.closest('#utSave')) return utSave();
-      if (t.closest('#utCancel')) { UT.draft = null; UT.place = false; return utDraw(); }
-      if (t.closest('#utBack')) { UT.sel = ''; return utDraw(); }
-      if (t.closest('#utDel')) return utDelete();
-      const li = t.closest('[data-id]'); if (li) { UT.sel = li.dataset.id; utDraw(); }
+    $('#utSide').addEventListener('input', e => utDraftSet(e.target));
+    $('#utSide').addEventListener('change', e => utDraftSet(e.target));
+    $('#utSide').addEventListener('click', async e => {
+      const t = e.target, q = s => t.closest(s);
+      if (q('[data-col]')) { const c = q('[data-col]').dataset.col; UT.draft.color = c; const ci = $('#utSide [data-f="color"]'); if (ci) ci.value = c; $$('#utSide .ut-swb').forEach(x => x.classList.toggle('on', x.dataset.col === c)); return utPins(); }
+      if (q('#utSave')) return utSave();
+      if (q('#utCancel')) { UT.draft = null; UT.place = false; UT.from = false; $('#utSide').innerHTML = ''; return utDraw(); }
+      if (q('#utFromBtn')) { UT.from = !UT.from; $('#utFromBtn').classList.toggle('on', UT.from); toast(UT.from ? 'Click the map where the player stands to throw.' : 'Cancelled.'); return utToolbar(); }
+      if (q('#utFromClr')) { UT.draft.fx = UT.draft.fy = null; $('#utSide').innerHTML = ''; return utDraw(); }
+      if (q('#utCollAdd')) return utAddCollab();
+      if (q('[data-cdel]')) { UT.draft.collab = UT.draft.collab.filter(c => c !== q('[data-cdel]').dataset.cdel); $('#utColl').innerHTML = utChips(UT.draft); return; }
+      if (q('#utBack')) { UT.sel = ''; return utDraw(); }
+      if (q('#utEdit')) { const m = (UT.data[UT.map] || []).find(x => x.id === UT.sel); if (m) { UT.draft = Object.assign(utBlank(0, 0), m, { collab: (m.collab || []).slice() }); UT.place = false; $('#utSide').innerHTML = ''; utDraw(); } return; }
+      if (q('#utVis')) { const m = (UT.data[UT.map] || []).find(x => x.id === UT.sel); return utAct('edit', { marker: { vis: m.vis === 'private' ? 'public' : 'private' } }, m.vis === 'private' ? 'Now visible to everyone.' : 'Now private.'); }
+      if (q('#utLeave')) return utAct('leave', {}, 'You left this collaboration.');
+      if (q('#utDel')) { const m = (UT.data[UT.map] || []).find(x => x.id === UT.sel); if (!confirm('Permanently remove "' + m.title + '" for everyone?')) return; return utAct('del', {}, 'Lineup removed.'); }
+      if (q('[data-rate]')) return utAct('rate', { v: +q('[data-rate]').dataset.rate }, 'Thanks for rating.');
+      if (q('[data-lk]')) { e.preventDefault(); showTab('tab3', { id: 'account' }); $('#lkIn').value = q('[data-lk]').dataset.lk; return lkSearch(true); }
+      const li = q('[data-id]'); if (li && !UT.draft) { UT.sel = li.dataset.id; utDraw(); }
     });
+    setInterval(() => { if (tab3Sub === 'utilities' && $('#tab3').classList.contains('active') && !UT.draft && !document.hidden) utLoad(); }, 30000);   // ratings and new lineups of other users appear without a reload
+  }
+
+  /* =====================================================================
+     12i. CS2 LEADERBOARD: top 100 Premier (Valve's official board) and FACEIT, 20 rows at a time. A row opens the player lookup.
+     ===================================================================== */
+  const LB_PREM = [['global', 'World'], ['europe', 'Europe'], ['northamerica', 'North America'], ['southamerica', 'South America'], ['asia', 'Asia'], ['australia', 'Australia'], ['africa', 'Africa'], ['china', 'China']];
+  const LB_FACE = [['EU', 'Europe'], ['US', 'North America'], ['SEA', 'South-East Asia'], ['OCE', 'Oceania'], ['SA', 'South America']];
+  const LB = { type: 'premier', region: { premier: 'global', faceit: 'EU' }, data: {}, shown: 20, busy: false, err: '' };
+  const lbKey = () => LB.type + ':' + LB.region[LB.type];
+  const lbFlag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 127397 + c.charCodeAt(0))) : '';
+  async function lbLoad(force) {
+    const key = lbKey(), have = LB.data[key];
+    if (LB.busy || (have && !force && Date.now() - have.at < 300000)) return lbDraw();
+    const b = bridgeUrl(); if (!b) { LB.err = 'The leaderboard needs the Worker bridge (Admin > Steam API Provisioning).'; return lbDraw(); }
+    LB.busy = true; LB.err = ''; lbDraw();
+    try {
+      const res = await fetchText(b + '/leaderboard?type=' + LB.type + '&region=' + encodeURIComponent(LB.region[LB.type]), {}, 25000);
+      let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+      if (res.status === 404 && !j) throw new Error('the Worker is the old version: deploy the new worker.js');
+      if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
+      LB.data[key] = { entries: j.entries || [], season: j.season, total: j.total, at: Date.now() }; LB.shown = 20;
+    } catch (e) { LB.err = 'Could not load the leaderboard: ' + ((e && e.message) || 'network error'); }
+    finally { LB.busy = false; lbDraw(); }
+  }
+  function lbDraw() {
+    const prem = LB.type === 'premier', sel = $('#lbRegion'), opts2 = prem ? LB_PREM : LB_FACE;
+    $$('#lbTabs [data-lb]').forEach(b => { const on = b.dataset.lb === LB.type; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    sel.innerHTML = opts2.map(([k, n]) => `<option value="${k}"${k === LB.region[LB.type] ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    const d = LB.data[lbKey()], list = $('#lbList');
+    $('#lbMsg').textContent = LB.busy ? 'Loading leaderboard...' : LB.err; $('#lbMsg').style.color = LB.err && !LB.busy ? 'var(--danger)' : '';
+    $('#lbInfo').textContent = d ? (prem ? 'Season ' + d.season + ' - official Valve Premier leaderboard' + (d.total ? ' - ' + Number(d.total).toLocaleString('en-US') + ' ranked players' : '') + '. Valve publishes names without SteamIDs, so a row searches that name.' : 'FACEIT CS2 ranking - official FACEIT Data API. A row opens the linked Steam account.') : '';
+    if (!d) { list.innerHTML = LB.busy ? Array.from({ length: 8 }, () => '<div class="lb-row sk"></div>').join('') : ''; $('#lbMore').classList.add('hidden'); $('#lbCount').textContent = ''; return; }
+    const rows = d.entries.slice(0, LB.shown);
+    list.innerHTML = rows.map((e, i) => `<button type="button" class="lb-row${e.rank <= 3 ? ' top' + e.rank : ''}" data-i="${i}" style="--i:${i % 20}">
+      <span class="lb-rank">${e.rank}</span><span class="lb-name">${prem ? '' : lbFlag(e.country) + ' '}${esc(e.name || 'Unknown')}</span>
+      <span class="lb-val">${prem ? `<b class="lb-rating" style="color:${premCol(e.rating)}">${Number(e.rating).toLocaleString('en-US')}</b>` : `${e.level ? faceitBadge(e.level, 26) : ''}<b>${Number(e.elo).toLocaleString('en-US')}</b><small>ELO</small>`}</span><span class="lb-go" aria-hidden="true">&rsaquo;</span></button>`).join('')
+      || '<p class="muted">No entries.</p>';
+    const more = d.entries.length > LB.shown;
+    $('#lbMore').classList.toggle('hidden', !more);
+    $('#lbMore').textContent = 'Load ' + Math.min(20, d.entries.length - LB.shown) + ' more';
+    $('#lbCount').textContent = 'Showing ' + rows.length + ' of ' + d.entries.length;
+  }
+  async function lbOpen(i) {
+    const d = LB.data[lbKey()], e = d && d.entries[i]; if (!e) return;
+    let target = e.steamid || '';
+    if (!target && LB.type === 'faceit' && e.pid) {
+      toast('Opening ' + e.name + '...');
+      try {
+        const r = JSON.parse((await fetchText(bridgeUrl() + '/leaderboard?type=faceit&resolve=' + encodeURIComponent(e.pid), {}, 15000)).text);
+        if (!r.ok) throw new Error(r.error || 'not found'); target = r.steamid;
+      } catch (err) { return toast('Could not open this player: ' + ((err && err.message) || 'error')); }
+    }
+    if (!target) target = e.name;
+    showTab('tab3', { id: 'account' });
+    $('#lkIn').value = target; lkSearch(true);
+  }
+  function lbEnter() { lbDraw(); lbLoad(); }
+  function lbInit() {
+    $('#lbTabs').addEventListener('click', e => { const b = e.target.closest('[data-lb]'); if (!b) return; LB.type = b.dataset.lb; LB.shown = 20; LB.err = ''; lbEnter(); });
+    $('#lbRegion').addEventListener('change', e => { LB.region[LB.type] = e.target.value; LB.shown = 20; LB.err = ''; lbEnter(); });
+    $('#lbMore').addEventListener('click', () => { LB.shown = Math.min(100, LB.shown + 20); lbDraw(); });
+    $('#lbList').addEventListener('click', e => { const r = e.target.closest('[data-i]'); if (r) lbOpen(+r.dataset.i); });
   }
 
     /* =====================================================================
+     12j. CHEATER FLAGS: admins flag a Steam account; Account Search then shows a red CHEATER tag and a 0% trust factor.
+     Stored on the Worker (/flags, public read, admin write) so every visitor sees it.
+     ===================================================================== */
+  const FL = { map: load('mway_flags', {}), at: 0 };
+  const flOf = id => FL.map && FL.map[String(id || '')];
+  async function flLoad(force) {
+    const b = bridgeUrl(); if (!b || (!force && Date.now() - FL.at < 300000)) return; FL.at = Date.now();
+    try { const j = JSON.parse((await fetchText(b + '/flags', {}, 10000)).text); if (j && j.ok && j.flags) { FL.map = j.flags; lsPut('mway_flags', FL.map); flRender(); } } catch { /* offline: keep the cached copy */ }
+  }
+  function flSay(t, bad) { const el = $('#flMsg'); el.textContent = t || ''; el.style.color = bad ? 'var(--danger)' : ''; }
+  function flRender() {
+    const ids = Object.keys(FL.map || {}).sort((a, b) => (FL.map[b].t || 0) - (FL.map[a].t || 0));
+    $('#flList').innerHTML = ids.length ? ids.map(id => `<div class="fl-row"><a href="https://steamcommunity.com/profiles/${esc(id)}" target="_blank" rel="noopener noreferrer">${esc(id)}</a><span class="muted">${esc(FL.map[id].note || '')}</span><span class="muted">${esc(new Date(FL.map[id].t || 0).toISOString().slice(0, 10))}</span><button type="button" class="btn btn-small" data-flview="${esc(id)}">Lookup</button><button type="button" class="btn btn-small btn-danger" data-fldel="${esc(id)}">Remove</button></div>`).join('') : '<p class="muted">No flagged accounts.</p>';
+  }
+  async function flCall(method, id, note) {
+    const b = bridgeUrl(), tok = gsToken(); if (!b || !tok) throw new Error('Set the Worker bridge URL and token (or log in with an admin Steam account) first.');
+    const res = await fetchText(b + '/flags' + (method === 'DELETE' ? '?id=' + id : ''), { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: method === 'POST' ? JSON.stringify({ id, note }) : undefined }, 12000);
+    let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+    if (res.status === 404 && !j) throw new Error('the Worker is the old version: deploy the new worker.js');
+    if (res.status === 401) throw new Error('the Worker rejected the admin token');
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
+    FL.map = j.flags || FL.map; lsPut('mway_flags', FL.map);
+  }
+  async function flAdd() {
+    if (!isAdmin()) return;
+    const raw = $('#flIn').value.trim(); if (!raw) return flSay('Paste a Steam profile link first.', true);
+    flSay('Resolving profile...');
+    try {
+      const p = lkParse(raw); if (!p || p.err) throw new Error('could not recognise that link');
+      const id = p.id || await lkResolve(p.vanity); if (!id) throw new Error('profile not found');
+      if (ADMIN_STEAM_IDS.includes(id)) throw new Error('admin accounts cannot be flagged');
+      await flCall('POST', id, $('#flNote').value.trim());
+      $('#flIn').value = ''; $('#flNote').value = ''; flSay('Flagged ' + id + '. Everyone now sees the CHEATER tag on this account.'); flRender();
+    } catch (e) { flSay('Could not flag: ' + e.message, true); }
+  }
+  $('#flAdd').addEventListener('click', flAdd);
+  $('#flIn').addEventListener('keydown', e => { if (e.key === 'Enter') flAdd(); });
+  $('#flList').addEventListener('click', async e => {
+    const d = e.target.closest('[data-fldel]'), v = e.target.closest('[data-flview]');
+    if (v) { showTab('tab3', { id: 'account' }); $('#lkIn').value = v.dataset.flview; return lkSearch(true); }
+    if (!d || !isAdmin()) return;
+    try { await flCall('DELETE', d.dataset.fldel); flRender(); flSay('Flag removed.'); } catch (err) { flSay('Could not remove: ' + err.message, true); }
+  });
+
+  /* =====================================================================
      13. INIT
      ===================================================================== */
   GS.pending = !!bridgeUrl();
@@ -3863,6 +4060,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   introDecode();
   xhInit();
   utInit();
+  flRender(); flLoad(); adminCheck(true);
+  lbInit();
   lkInit();
   cvInit();
   diagInit();

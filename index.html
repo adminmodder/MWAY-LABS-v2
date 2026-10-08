@@ -25,7 +25,7 @@
         <button type="button" class="tab-menu-item" role="menuitem" data-sub="account">ACCOUNT SEARCH</button>
         <button type="button" class="tab-menu-item" role="menuitem" data-sub="crosshair">CROSSHAIR GENERATOR</button>
         <button type="button" class="tab-menu-item" role="menuitem" data-sub="utilities">UTILITIES <span class="dd-pill beta" title="In development">BETA</span></button>
-        <button type="button" class="tab-menu-item is-off" role="menuitem" data-sub="leaderboard" disabled aria-disabled="true" title="Coming soon">LEADERBOARD <span class="dd-pill soon">COMING SOON</span></button>
+        <button type="button" class="tab-menu-item" role="menuitem" data-sub="leaderboard">LEADERBOARD <span class="dd-pill beta" title="In development">BETA</span></button>
       </div>
     </div>
     <button class="tab admin-only hidden" data-tab="admin">ADMIN</button>
@@ -127,7 +127,7 @@
   <!-- ROADMAP -->
   <section id="roadmap" class="page">
     <h2 class="section-title" data-lbl="roadmap">ROADMAP</h2>
-    <div id="rmMain" class="panel"></div>
+    <div id="rmMain" class="rmx"></div>
     <div id="rmAdmin" class="panel admin-only hidden mt">
       <div class="panel-head"><h2>Roadmap Editor</h2><span class="badge">MILESTONES</span></div>
       <div id="rmRows" class="rm-rows"></div>
@@ -173,7 +173,7 @@
       <div class="xh-layout">
         <div class="xh-side">
           <canvas id="xhCv" width="300" height="300" class="xh-cv"></canvas>
-          <div class="xh-bgs" id="xhBgs" role="group" aria-label="Preview background"><button type="button" class="btn btn-small on" data-map="dust" aria-pressed="true" title="Dust II backdrop from Steam Workshop screenshots (click again for the next view)">DUST</button><button type="button" class="btn btn-small" data-map="nuke" aria-pressed="false" title="Nuke backdrop from Steam Workshop screenshots (click again for the next view)">NUKE</button><button type="button" class="btn btn-small" data-map="cache" aria-pressed="false" title="Cache backdrop from Steam Workshop screenshots (click again for the next view)">CACHE</button><button type="button" class="btn btn-small" data-bg="#161b24" aria-pressed="false">Dark</button></div>
+          <div class="xh-bgs" id="xhBgs" role="group" aria-label="Preview background"><button type="button" class="btn btn-small on" data-map="dust2" aria-pressed="true" title="Official in-game Dust Ii screenshot (click again for the next view)">DUST II</button><button type="button" class="btn btn-small" data-map="mirage" aria-pressed="false" title="Official in-game Mirage screenshot (click again for the next view)">MIRAGE</button><button type="button" class="btn btn-small" data-map="inferno" aria-pressed="false" title="Official in-game Inferno screenshot (click again for the next view)">INFERNO</button><button type="button" class="btn btn-small" data-map="nuke" aria-pressed="false" title="Official in-game Nuke screenshot (click again for the next view)">NUKE</button><button type="button" class="btn btn-small" data-map="overpass" aria-pressed="false" title="Official in-game Overpass screenshot (click again for the next view)">OVERPASS</button><button type="button" class="btn btn-small" data-map="ancient" aria-pressed="false" title="Official in-game Ancient screenshot (click again for the next view)">ANCIENT</button><button type="button" class="btn btn-small" data-map="anubis" aria-pressed="false" title="Official in-game Anubis screenshot (click again for the next view)">ANUBIS</button><button type="button" class="btn btn-small" data-map="vertigo" aria-pressed="false" title="Official in-game Vertigo screenshot (click again for the next view)">VERTIGO</button><button type="button" class="btn btn-small" data-map="train" aria-pressed="false" title="Official in-game Train screenshot (click again for the next view)">TRAIN</button><button type="button" class="btn btn-small" data-bg="#161b24" aria-pressed="false">Dark</button></div>
           <p class="muted xh-bglbl" id="xhBgLbl" role="status"></p>
           <p class="muted xh-px" id="xhPx" role="status"></p>
           <span class="flabel">Share code (export)</span>
@@ -181,7 +181,7 @@
           <span class="flabel">Import a share code</span>
           <div class="field"><input id="xhImp" placeholder="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx or CS&hellip;" autocomplete="off" spellcheck="false" aria-label="Paste a CS2 crosshair share code to import"><button id="xhImpGo" type="button" class="btn btn-small">Import</button></div>
           <p class="muted xh-imp" id="xhImpMsg" role="status"></p>
-          <div class="row"><button id="xhSave" type="button" class="btn btn-small hidden">Save to account</button></div>
+          <div class="row"><button id="xhSave" type="button" class="btn btn-small hidden">Save to account</button><button id="xhPublish" type="button" class="btn btn-small hidden" title="Make this crosshair show on your profile in Account Search">Publish to my profile</button></div>
           <p class="muted" id="xhHint">Log in (or log in with Steam) to save crosshairs to your account.</p>
           <p class="muted">September 2026 &ldquo;Rush Hour&rdquo; format (build 1.41.8.8+): length, thickness and gap are whole pixels at 1280x720 and scale with your resolution. Valve changed the share-code format again on 30 Sep, so import codes may be rejected; the old-command converter below is the reliable way to move an old setup across. The preview is approximate; outline weight is preview only because the game no longer has an outline thickness setting.</p>
         </div>
@@ -206,17 +206,30 @@
       <div class="ut-maps" id="utMaps" role="tablist" aria-label="CS2 maps"></div>
       <div class="ut-bar">
         <div class="ut-types" id="utTypes" role="group" aria-label="Filter by utility type"></div>
-        <div class="ut-actions"><span class="muted" id="utCount"></span><button id="utPlace" type="button" class="btn btn-primary btn-small" aria-pressed="false">+ Add marker</button></div>
+        <div class="ut-actions"><select id="utSort" aria-label="Sort lineups"><option value="top">Top rated</option><option value="new">Newest</option></select><button id="utMine" type="button" class="ut-chip hidden" style="--c:#ffb454">My lineups</button><div class="ut-lvl hidden" id="utLvl" role="group" aria-label="Map level"></div><span class="muted" id="utCount"></span><button id="utPlace" type="button" class="btn btn-primary btn-small" aria-pressed="false">+ Add marker</button></div>
       </div>
       <p class="muted" id="utMsg" role="status"></p>
       <div class="ut-layout">
         <div class="ut-board" id="utBoard" aria-label="Map. Click to place or select a marker.">
           <img id="utImg" alt="" draggable="false">
+          <svg class="ut-lines" id="utLines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div class="ut-fallback" id="utFallback" aria-hidden="true"><span id="utFbName"></span><small id="utFbHint"></small></div>
           <div class="ut-pins" id="utPins"></div>
         </div>
         <aside class="ut-side" id="utSide" aria-live="polite"></aside>
       </div>
+    </div>
+
+    <div class="panel lb-panel" id="lbPanel" data-subpage="leaderboard">
+      <div class="panel-head"><h2>CS2 Leaderboard <span class="dd-pill beta">BETA</span></h2><span class="badge">TOP 100</span></div>
+      <div class="lb-top">
+        <div class="lb-tabs" id="lbTabs" role="tablist" aria-label="Leaderboard type"><button type="button" role="tab" data-lb="premier" class="on">PREMIER</button><button type="button" role="tab" data-lb="faceit">FACEIT</button></div>
+        <select id="lbRegion" aria-label="Region"></select>
+      </div>
+      <p class="muted" id="lbInfo"></p>
+      <p class="muted" id="lbMsg" role="status"></p>
+      <div class="lb-list" id="lbList" aria-live="polite"></div>
+      <div class="lb-foot"><button id="lbMore" type="button" class="btn btn-primary btn-small hidden">Load 20 more</button><span class="muted" id="lbCount"></span></div>
     </div>
   </section>
 
@@ -263,6 +276,7 @@
         <button id="gsPull" type="button" class="btn btn-small">Reload from server</button>
       </div>
       <p class="muted" id="gsStatus" role="status"></p>
+      <p class="muted" id="adminSrv" role="status"></p>
     </div>
 
     <div class="panel mt">
@@ -342,6 +356,13 @@
       <p class="muted">Sign-ups are stored in this browser's localStorage (no server), so this list only contains addresses submitted from this browser. Export regularly.</p>
     </div>
 
+    <div class="panel mt" id="flPanel">
+      <div class="panel-head"><h2>Cheater Flags</h2><span class="badge">PUBLIC RED TAG</span></div>
+      <p class="muted">Paste a Steam profile link (or SteamID64 / custom name). Flagged accounts show a red CHEATER tag in Account Search and their trust factor drops to 0%. Flags are shared with every visitor.</p>
+      <div class="field"><input id="flIn" placeholder="https://steamcommunity.com/id/... or /profiles/7656119..." autocomplete="off" spellcheck="false"><input id="flNote" maxlength="80" placeholder="Reason (optional)" autocomplete="off"><button id="flAdd" type="button" class="btn btn-primary btn-small">Flag account</button></div>
+      <p class="muted" id="flMsg" role="status"></p>
+      <div id="flList" class="fl-list"></div>
+    </div>
     <div class="panel mt" id="slPanel">
       <div class="panel-head"><h2>Server Error &amp; API Log</h2><span class="badge">CLOUDFLARE WORKER</span></div>
       <div class="dg-bar">
