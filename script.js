@@ -2965,6 +2965,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
 
   function lkRender(d) {
     const lf = d.lf || {}, rk = lf.ranks || {}, tr = lkTrust(d);
+    if (rk.premier && d.id) lbReport(d.id);
     const ini = esc((d.name || '?')[0].toUpperCase());
     const avatar = /^https:\/\//i.test(d.avatar || '') ? `<img class="avatar-img" src="${esc(d.avatar)}" alt="" referrerpolicy="no-referrer" data-fb="${ini}">` : `<div class="avatar">${ini}</div>`;
     const url = /^https:\/\/steamcommunity\.com\//i.test(d.url || '') ? d.url : 'https://steamcommunity.com/profiles/' + d.id;
@@ -3961,10 +3962,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   /* =====================================================================
      12i. CS2 LEADERBOARD: top 100 Premier (Valve's official board) and FACEIT, 20 rows at a time. A row opens the player lookup.
      ===================================================================== */
-  const LB_PREM = [['global', 'World'], ['europe', 'Europe'], ['northamerica', 'North America'], ['southamerica', 'South America'], ['asia', 'Asia'], ['australia', 'Australia'], ['africa', 'Africa'], ['china', 'China']];
   const LB_FACE = [['EU', 'Europe'], ['NA', 'North America'], ['SEA', 'South-East Asia'], ['OCE', 'Oceania'], ['SA', 'South America']];
   const LB = { av: load('mway_lbav', {}), type: 'premier', region: { premier: 'global', faceit: 'EU' }, data: {}, shown: 20, busy: false, err: '' };
-  const lbKey = () => LB.type + ':' + LB.region[LB.type];
+  const lbKey = () => LB.type === 'premier' ? 'premier:board' : LB.type + ':' + LB.region[LB.type];
   const lbFlag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 127397 + c.charCodeAt(0))) : '';
   async function lbLoad(force) {
     const key = lbKey(), have = LB.data[key];
@@ -3972,7 +3972,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     const b = bridgeUrl(); if (!b) { LB.err = 'The leaderboard needs the Worker bridge (Admin > Steam API Provisioning).'; return lbDraw(); }
     LB.busy = true; LB.err = ''; lbDraw();
     try {
-      const res = await fetchText(b + '/leaderboard?type=' + LB.type + '&region=' + encodeURIComponent(LB.region[LB.type]), {}, 25000);
+      const res = await fetchText(b + '/leaderboard?type=' + LB.type + (LB.type === 'faceit' ? '&region=' + encodeURIComponent(LB.region.faceit) : ''), {}, 25000);
       let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
       if (res.status === 404 && !j) throw new Error('the Worker is the old version: deploy the new worker.js');
       if (!j || !j.ok) throw new Error(((j && j.error) || 'HTTP ' + res.status) + (j && j.detail ? ' [' + j.detail + ']' : ''));
@@ -3981,24 +3981,50 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     finally { LB.busy = false; lbDraw(); }
   }
   function lbDraw() {
-    const prem = LB.type === 'premier', sel = $('#lbRegion'), opts2 = prem ? LB_PREM : LB_FACE;
+    const prem = LB.type === 'premier', sel = $('#lbRegion'), opts2 = prem ? [] : LB_FACE;
     $$('#lbTabs [data-lb]').forEach(b => { const on = b.dataset.lb === LB.type; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    sel.classList.toggle('hidden', prem); $('#lbAdd').classList.toggle('hidden', !prem);
+    $('#lbAddBtn').disabled = !(session && (session.steam || isAdmin())); $('#lbAddBtn').title = $('#lbAddBtn').disabled ? 'Log in with Steam to add players' : '';
     sel.innerHTML = opts2.map(([k, n]) => `<option value="${k}"${k === LB.region[LB.type] ? ' selected' : ''}>${esc(n)}</option>`).join('');
     const d = LB.data[lbKey()], list = $('#lbList');
     $('#lbMsg').textContent = LB.busy ? 'Loading leaderboard...' : LB.err; $('#lbMsg').style.color = LB.err && !LB.busy ? 'var(--danger)' : '';
-    $('#lbInfo').textContent = d ? (prem ? 'Season ' + d.season + ' - official Valve Premier leaderboard' + (d.stale ? ' (saved copy: Valve is not answering right now)' : '') + (d.total ? ' - ' + Number(d.total).toLocaleString('en-US') + ' ranked players' : '') + '. Valve publishes names without SteamIDs, so a row searches that name.' : 'FACEIT CS2 ranking - official FACEIT Data API. A row opens the linked Steam account.') : '';
+    $('#lbInfo').textContent = d ? (prem ? 'Community Premier board: ' + Number(d.total || d.entries.length).toLocaleString('en-US') + ' players tracked. Valve has closed its public Premier leaderboard, so players join when someone looks them up in Account Search or adds them below. Ratings are fetched from Leetify by the server.' : 'FACEIT CS2 ranking - official FACEIT Data API' + (d.stale ? ' (saved copy: FACEIT is not answering right now)' : '') + '. A row opens the linked Steam account.') : '';
     if (!d) { list.innerHTML = LB.busy ? Array.from({ length: 8 }, () => '<div class="lb-row sk"></div>').join('') : ''; $('#lbMore').classList.add('hidden'); $('#lbCount').textContent = ''; return; }
-    const rows = d.entries.slice(0, LB.shown), avOf = e => (e.pid && LB.av['f' + e.pid]) || (e.steamid && LB.av['s' + e.steamid]) || '';
+    const rows = d.entries.slice(0, LB.shown), avOf = e => e.avatar || (e.pid && LB.av['f' + e.pid]) || (e.steamid && LB.av['s' + e.steamid]) || '';
     list.innerHTML = rows.map((e, i) => { const nm = e.priv || !e.name ? 'Private profile' : e.name, av = avOf(e); return `<button type="button" class="lb-row${e.rank <= 3 ? ' top' + e.rank : ''}${e.priv ? ' priv' : ''}" data-i="${i}" style="--i:${i % 20}"${e.priv ? ' disabled' : ''}>
       <span class="lb-rank">${e.rank}</span><span class="lb-av">${av ? `<img src="${esc(av)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : esc(e.priv ? '?' : [...nm][0] || '?')}</span>
-      <span class="lb-name">${prem ? '' : lbFlag(e.country) + ' '}${esc(nm)}</span>
+      <span class="lb-name">${lbFlag(e.country) ? lbFlag(e.country) + ' ' : ''}${esc(nm)}</span>
       <span class="lb-val">${prem ? `<b class="lb-rating" style="color:${premCol(e.rating)}">${Number(e.rating).toLocaleString('en-US')}</b>` : `${e.level ? faceitBadge(e.level, 26) : ''}<b>${Number(e.elo).toLocaleString('en-US')}</b><small>ELO</small>`}</span><span class="lb-go" aria-hidden="true">&rsaquo;</span></button>`; }).join('')
-      || '<p class="muted">No entries.</p>';
+      || (prem ? '<p class="muted">No players on the board yet. Look players up in Account Search, or paste Steam profile links above (several at once, separated by spaces).</p>' : '<p class="muted">No entries.</p>');
     lbAvatars(rows);
     const more = d.entries.length > LB.shown;
     $('#lbMore').classList.toggle('hidden', !more);
     $('#lbMore').textContent = 'Load ' + Math.min(20, d.entries.length - LB.shown) + ' more';
     $('#lbCount').textContent = 'Showing ' + rows.length + ' of ' + d.entries.length;
+  }
+  async function lbAddPlayer() {
+    const inp = $('#lbAddIn'), parts = inp.value.split(/[\s,]+/).filter(Boolean).slice(0, 10); if (!parts.length) return;
+    if (!(session && (session.steam || isAdmin()))) return toast('Log in with Steam to add players.');
+    $('#lbAddBtn').disabled = true; let added = 0, last = '';
+    for (const raw of parts) {
+      try {
+        const p = lkParse(raw); if (!p || p.err) throw new Error('not a Steam profile link or ID');
+        const id = p.id || await lkResolve(p.vanity); if (!id) throw new Error('profile not found');
+        const res = await fetchText(bridgeUrl() + '/leaderboard?type=premier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: id }) }, 20000);
+        let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
+        if (res.status === 404 && !j) throw new Error('the Worker is the old version: deploy the new worker.js');
+        if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
+        added++; last = j.entry.name + ' (' + Number(j.entry.rating).toLocaleString('en-US') + ')';
+      } catch (e) { toast('Could not add ' + raw.slice(0, 30) + ': ' + ((e && e.message) || 'error')); }
+    }
+    if (added) { inp.value = ''; toast(added === 1 ? last + ' is on the board.' : added + ' players added to the board.'); delete LB.data['premier:board']; await lbLoad(true); }
+    lbDraw();
+  }
+  const LBREP = load('mway_lbrep', {});
+  function lbReport(id) {   // every Account Search result with a Premier rating also feeds the community board (the server re-checks the rating)
+    const b = bridgeUrl(), now = Date.now(); if (!b || (LBREP[id] && now - LBREP[id] < 6 * 3600e3)) return;
+    LBREP[id] = now; lsPut('mway_lbrep', LBREP);
+    fetchText(b + '/leaderboard?type=premier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: id }) }, 20000).then(() => { delete LB.data['premier:board']; }).catch(() => { /* optional */ });
   }
   let lbAvBusy = false;
   async function lbAvatars(rows) {   // profile pictures: FACEIT avatars, or Steam avatars when a row carries a SteamID
@@ -4034,6 +4060,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function lbInit() {
     $('#lbTabs').addEventListener('click', e => { const b = e.target.closest('[data-lb]'); if (!b) return; LB.type = b.dataset.lb; LB.shown = 20; LB.err = ''; lbEnter(); });
     $('#lbRegion').addEventListener('change', e => { LB.region[LB.type] = e.target.value; LB.shown = 20; LB.err = ''; lbEnter(); });
+    $('#lbAddBtn').addEventListener('click', lbAddPlayer);
+    $('#lbAddIn').addEventListener('keydown', e => { if (e.key === 'Enter') lbAddPlayer(); });
     $('#lbMore').addEventListener('click', () => { LB.shown = Math.min(100, LB.shown + 20); lbDraw(); });
     $('#lbList').addEventListener('click', e => { const r = e.target.closest('[data-i]'); if (r) lbOpen(+r.dataset.i); });
   }
