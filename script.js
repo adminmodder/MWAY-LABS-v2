@@ -3711,12 +3711,14 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   const UT_COLORS = ['#9db4d6', '#f2d65b', '#ff7a45', '#7ddf8a', '#c58bff', '#ff5c8a', '#4fd6e0', '#ffffff'];
   const UT_HOST = /^(cdn\.discordapp\.com|media\.discordapp\.net|(www\.)?discord(app)?\.com|discord\.gg|(www\.|m\.)?youtube\.com|youtu\.be)$/i;
   const UT_LOCAL = 'mway_markers';
-  const UT = { map: 'mirage', lvl: 0, type: 'all', side: 'all', sort: 'top', mine: false, data: load(UT_LOCAL, {}), sel: '', draft: null, place: false, from: false, remote: false, ready: false, loading: false, at: 0 };
+  const UT = { seq: 0, pend: {}, gone: {}, login: false, map: 'mirage', lvl: 0, type: 'all', side: 'all', sort: 'top', mine: false, data: load(UT_LOCAL, {}), sel: '', draft: null, place: false, from: false, remote: false, ready: false, loading: false, at: 0 };
   const utCan = () => !!(session && session.steam);
   const utMember = m => !!(session && session.steam && (m.by === session.id || (m.collab || []).includes(session.id)));
   const utName = id => (UT_MAPS.find(m => m[0] === id) || [id, id])[1];
   const utCol = m => /^#[0-9a-f]{6}$/i.test(m.color || '') ? m.color : (UT_TYPES[m.type] || UT_TYPES.other)[1];
+  const utSeen = () => utCan() || isAdmin();   // community lineups (global ones too) are only shown to Steam-logged-in users and admins
   function utList() {
+    if (!utSeen()) return [];
     const l = (UT.data[UT.map] || []).filter(m => (m.lvl || 0) === UT.lvl && (UT.type === 'all' || m.type === UT.type) && (UT.side === 'all' || (m.side || 'both') === UT.side || (m.side || 'both') === 'both') && (!UT.mine || utMember(m)));
     return l.sort(UT.sort === 'new' ? (a, b) => b.ts - a.ts : (a, b) => (b.avg || 0) - (a.avg || 0) || (b.n || 0) - (a.n || 0) || b.ts - a.ts);
   }
@@ -3737,20 +3739,32 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
   function utSay(msg, bad) { const el = $('#utMsg'); if (el) { el.textContent = msg || ''; el.style.color = bad ? 'var(--danger)' : ''; } }
   async function utApi(body) {
     const b = bridgeUrl(); if (!b) throw new Error('no bridge');
-    const tok = (session && session.tok) || gsToken();
+    const tok = (session && session.tok) || (isAdmin() ? gsToken() : '');
     const res = await fetchText(b + '/markers', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }, 12000);
     let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
     if (res.status === 200 && j && j.ok) return j;
     const e = new Error((j && j.error) || 'HTTP ' + res.status); e.status = res.status; throw e;
   }
+  function utMerge(server) {   // server copy + my own writes from the last 3 minutes (the shared store can lag behind a fresh save)
+    const now = Date.now(), out = {};
+    Object.keys(server || {}).forEach(k => { out[k] = (server[k] || []).filter(m => !(UT.gone[m.id] && now - UT.gone[m.id] < 180000)); });
+    Object.keys(UT.pend).forEach(id => {
+      const p = UT.pend[id]; if (now - p.t > 180000) { delete UT.pend[id]; return; }
+      const list = out[p.m.map] = out[p.m.map] || [], i = list.findIndex(x => x.id === id);
+      if (i >= 0) list[i] = Object.assign({}, list[i], p.m); else list.push(p.m);
+    });
+    Object.keys(UT.gone).forEach(id => { if (now - UT.gone[id] > 180000) delete UT.gone[id]; });
+    return out;
+  }
   async function utLoad() {
-    if (UT.loading) return; UT.loading = true;
+    if (UT.loading) return; UT.loading = true; const my = ++UT.seq;
     try {
       const b = bridgeUrl(); if (!b) throw new Error('no bridge');
-      const tok = session && session.tok, res = await fetchText(b + '/markers', tok ? { headers: { Authorization: 'Bearer ' + tok } } : {}, 10000), j = JSON.parse(res.text);
+      const tok = (session && session.tok) || (isAdmin() ? gsToken() : ''), res = await fetchText(b + '/markers', tok ? { headers: { Authorization: 'Bearer ' + tok } } : {}, 10000), j = JSON.parse(res.text);
       if (res.status !== 200 || !j || !j.ok || typeof j.markers !== 'object') throw new Error('unavailable');
-      UT.data = j.markers; UT.remote = true; lsPut(UT_LOCAL, UT.data); utSay('');
-    } catch { UT.remote = false; utSay('Shared lineups are offline (Worker not reachable or not updated). Showing and saving lineups on this device only.'); }
+      if (my < UT.seq) return;   // a newer save happened while this was loading: its data would be older
+      UT.login = !!j.login; UT.data = UT.login ? {} : utMerge(j.markers); UT.remote = true; lsPut(UT_LOCAL, UT.login ? {} : UT.data); utSay('');
+    } catch { UT.remote = false; UT.login = false; utSay('Shared lineups are offline (Worker not reachable or not updated). Showing and saving lineups on this device only.'); }
     finally { UT.loading = false; UT.ready = true; UT.at = Date.now(); if (!UT.draft) utDraw(); }
   }
   function utEnter() { utDraw(); if (!UT.ready || Date.now() - UT.at > 20000) utLoad(); }
@@ -3760,7 +3774,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     pl.disabled = !can; pl.classList.toggle('on', UT.place && can); pl.setAttribute('aria-pressed', String(UT.place && can));
     pl.textContent = UT.place && can ? 'Click the map...' : '+ Add lineup';
     pl.title = can ? 'Press, then click the landing spot on the map' : 'Log in with Steam to add lineups';
-    $('#utIntro').textContent = can ? 'Press Add lineup, click where the grenade lands, then set colour, size, throw position and a Discord or YouTube video. Post it globally or keep it private.'
+    $('#utRefresh').classList.toggle('hidden', !utSeen());
+    $('#utIntro').textContent = !utSeen() ? 'Log in with Steam to see the community lineups, rate them and add your own. The maps are free to browse.' : can ? 'Press Add lineup, click where the grenade lands, then set colour, size, throw position and a Discord or YouTube video. Post it globally or keep it private.'
       : 'Official CS2 radar maps with community lineups. Log in with Steam to add your own and rate other players\' lineups.';
     $('#utBoard').classList.toggle('placing', (UT.place || UT.from) && can);
     $('#utMine').classList.toggle('hidden', !can); $('#utMine').classList.toggle('on', UT.mine);
@@ -3788,7 +3803,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#utCount').textContent = list.length + ' lineup' + (list.length === 1 ? '' : 's') + ' on ' + utName(UT.map);
   }
   function utDraw() {
-    $('#utMaps').innerHTML = UT_MAPS.map(([id, n]) => `<button type="button" class="ut-map${id === UT.map ? ' on' : ''}" role="tab" aria-selected="${id === UT.map}" data-map="${id}">${esc(n)}<i>${(UT.data[id] || []).length || ''}</i></button>`).join('');
+    $('#utMaps').innerHTML = UT_MAPS.map(([id, n]) => `<button type="button" class="ut-map${id === UT.map ? ' on' : ''}" role="tab" aria-selected="${id === UT.map}" data-map="${id}">${esc(n)}<i>${utSeen() ? (UT.data[id] || []).length || '' : ''}</i></button>`).join('');
     const chip = (k, v, n, c, on) => `<button type="button" class="ut-chip${on ? ' on' : ''}" data-${k}="${v}" style="--c:${c}" aria-pressed="${on}">${esc(n)}</button>`;
     $('#utTypes').innerHTML = chip('type', 'all', 'All', '#8fb2ff', UT.type === 'all') + Object.entries(UT_TYPES).map(([k, v]) => chip('type', k, v[0], v[1], UT.type === k)).join('')
       + '<span class="ut-sep"></span>' + [['all', 'Any side']].concat(UT_SIDES.slice(1)).map(([k, n]) => chip('side', k, n, '#8fb2ff', UT.side === k)).join('');
@@ -3822,7 +3837,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       <div class="row"><button id="utSave" type="button" class="btn btn-primary btn-small">${d.id ? 'Save changes' : 'Save lineup'}</button><button id="utCancel" type="button" class="btn btn-small">Cancel</button></div>`;
   }
   function utSide() {
-    const el = $('#utSide'), m = (UT.data[UT.map] || []).find(x => x.id === UT.sel);
+    const el = $('#utSide'), m = utSeen() ? (UT.data[UT.map] || []).find(x => x.id === UT.sel) : null;
+    if (!utSeen()) { el.innerHTML = '<h3>Community lineups</h3><p>Global lineups, ratings and collaborations are for players logged in with Steam.</p><p class="muted">Use the Steam button at the top of the page, then come back here.</p>'; return; }
     if (UT.draft && utCan()) { if (!el.querySelector('[data-f="title"]')) el.innerHTML = utForm(); return; }
     if (m) {
       const t = UT_TYPES[m.type] || UT_TYPES.other, v = utUrl(m.url), md = v ? utMedia(v) : {}, mem = utMember(m), own = utCan() && session.id === m.by, adm = isAdmin();
@@ -3848,7 +3864,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       : '<p class="muted">No lineups here yet.' + (utCan() ? ' Press Add lineup to create the first one.' : ' Log in with Steam to add one.') + '</p>');
   }
   const utBlank = (x, y) => ({ x, y, fx: null, fy: null, type: 'smoke', side: 'both', tech: 'stand', color: UT_TYPES.smoke[1], size: 26, area: 0, title: '', url: '', note: '', vis: 'public', collab: [], lvl: UT.lvl });
-  function utStore(map, list) { UT.data[map] = list; lsPut(UT_LOCAL, UT.data); }
+  function utStore(map, list) { UT.data[map] = list; UT.seq++; lsPut(UT_LOCAL, UT.data); }
+  const utKeep = m => { UT.pend[m.id] = { m, t: Date.now() }; delete UT.gone[m.id]; };
   async function utSave() {
     const d = UT.draft; if (!utCan() || !d) return;
     d.url = utUrl(d.url) || d.url; const title = String(d.title || '').trim();
@@ -3860,7 +3877,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       let m;
       if (UT.remote) m = (await utApi(d.id ? { op: 'edit', id: d.id, marker: payload } : { op: 'add', marker: payload })).marker;
       else m = d.id ? Object.assign({}, d, payload, { upd: Date.now() }) : Object.assign({}, payload, { id: 'l' + Date.now().toString(36), by: session.id, ts: Date.now(), avg: 0, n: 0 });
-      const list = (UT.data[UT.map] || []).filter(x => x.id !== m.id); utStore(UT.map, list.concat(m)); UT.sel = m.id;
+      const list = (UT.data[UT.map] || []).filter(x => x.id !== m.id); utStore(UT.map, list.concat(m)); utKeep(m); UT.sel = m.id; UT.type = 'all'; UT.side = 'all'; UT.mine = false; UT.lvl = m.lvl || 0;
       toast(d.id ? 'Lineup updated.' : UT.remote ? (m.vis === 'private' ? 'Saved privately.' : 'Lineup posted globally.') : 'Lineup saved on this device only.');
       UT.draft = null; UT.place = false; UT.from = false; $('#utSide').innerHTML = '';
     } catch (e) { toast(e.status === 401 ? 'Your Steam session has no write permission. Log out and log in with Steam again.' : 'Could not save: ' + e.message); $('#utSave') && ($('#utSave').disabled = false); return; }
@@ -3871,9 +3888,9 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     try {
       if (UT.remote && m.id[0] !== 'l') {
         const j = await utApi(Object.assign({ op, id: m.id }, extra || {}));
-        if (j.marker) utStore(UT.map, (UT.data[UT.map] || []).map(x => x.id === m.id ? j.marker : x));
-        else utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id));
-      } else if (op === 'del') utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id));
+        if (j.marker) { utStore(UT.map, (UT.data[UT.map] || []).map(x => x.id === m.id ? j.marker : x)); utKeep(j.marker); }
+        else { utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id)); UT.gone[m.id] = Date.now(); delete UT.pend[m.id]; }
+      } else if (op === 'del') { utStore(UT.map, (UT.data[UT.map] || []).filter(x => x.id !== m.id)); UT.gone[m.id] = Date.now(); }
       else if (op === 'edit') utStore(UT.map, (UT.data[UT.map] || []).map(x => x.id === m.id ? Object.assign({}, x, extra.marker) : x));
       if (op === 'del' || op === 'leave') UT.sel = '';
       if (okMsg) toast(okMsg);
@@ -3903,6 +3920,7 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     $('#utTypes').addEventListener('click', e => { const t = e.target.closest('[data-type]'), s = e.target.closest('[data-side]'); if (t) UT.type = t.dataset.type; else if (s) UT.side = s.dataset.side; else return; UT.sel = ''; utDraw(); });
     $('#utLvl').addEventListener('click', e => { const b = e.target.closest('[data-lvl]'); if (!b || UT.draft) return; UT.lvl = +b.dataset.lvl; UT.sel = ''; utDraw(); });
     $('#utSort').addEventListener('change', e => { UT.sort = e.target.value; utDraw(); });
+    $('#utRefresh').addEventListener('click', () => { UT.ready = false; utLoad(); toast('Refreshing lineups...'); });
     $('#utMine').addEventListener('click', () => { UT.mine = !UT.mine; UT.sel = ''; utDraw(); });
     $('#utPlace').addEventListener('click', () => {
       if (!utCan()) return toast('Log in with Steam to add lineups.');
@@ -3944,8 +3962,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
      12i. CS2 LEADERBOARD: top 100 Premier (Valve's official board) and FACEIT, 20 rows at a time. A row opens the player lookup.
      ===================================================================== */
   const LB_PREM = [['global', 'World'], ['europe', 'Europe'], ['northamerica', 'North America'], ['southamerica', 'South America'], ['asia', 'Asia'], ['australia', 'Australia'], ['africa', 'Africa'], ['china', 'China']];
-  const LB_FACE = [['EU', 'Europe'], ['US', 'North America'], ['SEA', 'South-East Asia'], ['OCE', 'Oceania'], ['SA', 'South America']];
-  const LB = { type: 'premier', region: { premier: 'global', faceit: 'EU' }, data: {}, shown: 20, busy: false, err: '' };
+  const LB_FACE = [['EU', 'Europe'], ['NA', 'North America'], ['SEA', 'South-East Asia'], ['OCE', 'Oceania'], ['SA', 'South America']];
+  const LB = { av: load('mway_lbav', {}), type: 'premier', region: { premier: 'global', faceit: 'EU' }, data: {}, shown: 20, busy: false, err: '' };
   const lbKey = () => LB.type + ':' + LB.region[LB.type];
   const lbFlag = cc => /^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map(c => 127397 + c.charCodeAt(0))) : '';
   async function lbLoad(force) {
@@ -3957,8 +3975,8 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
       const res = await fetchText(b + '/leaderboard?type=' + LB.type + '&region=' + encodeURIComponent(LB.region[LB.type]), {}, 25000);
       let j = null; try { j = JSON.parse(res.text); } catch { /* not JSON */ }
       if (res.status === 404 && !j) throw new Error('the Worker is the old version: deploy the new worker.js');
-      if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + res.status);
-      LB.data[key] = { entries: j.entries || [], season: j.season, total: j.total, at: Date.now() }; LB.shown = 20;
+      if (!j || !j.ok) throw new Error(((j && j.error) || 'HTTP ' + res.status) + (j && j.detail ? ' [' + j.detail + ']' : ''));
+      LB.data[key] = { entries: j.entries || [], season: j.season, total: j.total, stale: !!j.stale, at: Date.now() }; LB.shown = 20;
     } catch (e) { LB.err = 'Could not load the leaderboard: ' + ((e && e.message) || 'network error'); }
     finally { LB.busy = false; lbDraw(); }
   }
@@ -3968,17 +3986,35 @@ const BRIDGE_CONFIG = { url: 'https://mway-bridge.venovfx.workers.dev' };
     sel.innerHTML = opts2.map(([k, n]) => `<option value="${k}"${k === LB.region[LB.type] ? ' selected' : ''}>${esc(n)}</option>`).join('');
     const d = LB.data[lbKey()], list = $('#lbList');
     $('#lbMsg').textContent = LB.busy ? 'Loading leaderboard...' : LB.err; $('#lbMsg').style.color = LB.err && !LB.busy ? 'var(--danger)' : '';
-    $('#lbInfo').textContent = d ? (prem ? 'Season ' + d.season + ' - official Valve Premier leaderboard' + (d.total ? ' - ' + Number(d.total).toLocaleString('en-US') + ' ranked players' : '') + '. Valve publishes names without SteamIDs, so a row searches that name.' : 'FACEIT CS2 ranking - official FACEIT Data API. A row opens the linked Steam account.') : '';
+    $('#lbInfo').textContent = d ? (prem ? 'Season ' + d.season + ' - official Valve Premier leaderboard' + (d.stale ? ' (saved copy: Valve is not answering right now)' : '') + (d.total ? ' - ' + Number(d.total).toLocaleString('en-US') + ' ranked players' : '') + '. Valve publishes names without SteamIDs, so a row searches that name.' : 'FACEIT CS2 ranking - official FACEIT Data API. A row opens the linked Steam account.') : '';
     if (!d) { list.innerHTML = LB.busy ? Array.from({ length: 8 }, () => '<div class="lb-row sk"></div>').join('') : ''; $('#lbMore').classList.add('hidden'); $('#lbCount').textContent = ''; return; }
-    const rows = d.entries.slice(0, LB.shown);
-    list.innerHTML = rows.map((e, i) => `<button type="button" class="lb-row${e.rank <= 3 ? ' top' + e.rank : ''}" data-i="${i}" style="--i:${i % 20}">
-      <span class="lb-rank">${e.rank}</span><span class="lb-name">${prem ? '' : lbFlag(e.country) + ' '}${esc(e.name || 'Unknown')}</span>
-      <span class="lb-val">${prem ? `<b class="lb-rating" style="color:${premCol(e.rating)}">${Number(e.rating).toLocaleString('en-US')}</b>` : `${e.level ? faceitBadge(e.level, 26) : ''}<b>${Number(e.elo).toLocaleString('en-US')}</b><small>ELO</small>`}</span><span class="lb-go" aria-hidden="true">&rsaquo;</span></button>`).join('')
+    const rows = d.entries.slice(0, LB.shown), avOf = e => (e.pid && LB.av['f' + e.pid]) || (e.steamid && LB.av['s' + e.steamid]) || '';
+    list.innerHTML = rows.map((e, i) => { const nm = e.priv || !e.name ? 'Private profile' : e.name, av = avOf(e); return `<button type="button" class="lb-row${e.rank <= 3 ? ' top' + e.rank : ''}${e.priv ? ' priv' : ''}" data-i="${i}" style="--i:${i % 20}"${e.priv ? ' disabled' : ''}>
+      <span class="lb-rank">${e.rank}</span><span class="lb-av">${av ? `<img src="${esc(av)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : esc(e.priv ? '?' : [...nm][0] || '?')}</span>
+      <span class="lb-name">${prem ? '' : lbFlag(e.country) + ' '}${esc(nm)}</span>
+      <span class="lb-val">${prem ? `<b class="lb-rating" style="color:${premCol(e.rating)}">${Number(e.rating).toLocaleString('en-US')}</b>` : `${e.level ? faceitBadge(e.level, 26) : ''}<b>${Number(e.elo).toLocaleString('en-US')}</b><small>ELO</small>`}</span><span class="lb-go" aria-hidden="true">&rsaquo;</span></button>`; }).join('')
       || '<p class="muted">No entries.</p>';
+    lbAvatars(rows);
     const more = d.entries.length > LB.shown;
     $('#lbMore').classList.toggle('hidden', !more);
     $('#lbMore').textContent = 'Load ' + Math.min(20, d.entries.length - LB.shown) + ' more';
     $('#lbCount').textContent = 'Showing ' + rows.length + ' of ' + d.entries.length;
+  }
+  let lbAvBusy = false;
+  async function lbAvatars(rows) {   // profile pictures: FACEIT avatars, or Steam avatars when a row carries a SteamID
+    const f = rows.filter(e => e.pid && !LB.av['f' + e.pid]).map(e => e.pid).slice(0, 20), st = rows.filter(e => e.steamid && !LB.av['s' + e.steamid]).map(e => e.steamid).slice(0, 20);
+    const b = bridgeUrl(); if (!b || lbAvBusy || !(f.length || st.length)) return;
+    lbAvBusy = true;
+    try {
+      const j = JSON.parse((await fetchText(b + '/leaderboard?type=avatars&faceit=' + f.join(',') + '&steam=' + st.join(','), {}, 25000)).text);
+      if (j && j.ok) {
+        Object.entries(j.faceit || {}).forEach(([id, v]) => { if (v && v.avatar) LB.av['f' + id] = v.avatar; });
+        Object.entries(j.steam || {}).forEach(([id, v]) => { if (v) LB.av['s' + id] = v; });
+        lsPut('mway_lbav', LB.av);
+      }
+    } catch { /* pictures are optional */ }
+    finally { lbAvBusy = false; }
+    $$('#lbList .lb-row').forEach(r => { const e = rows[+r.dataset.i], av = e && ((e.pid && LB.av['f' + e.pid]) || (e.steamid && LB.av['s' + e.steamid])), box = r.querySelector('.lb-av'); if (av && box && !box.querySelector('img')) box.innerHTML = `<img src="${esc(av)}" alt="" loading="lazy" referrerpolicy="no-referrer">`; });
   }
   async function lbOpen(i) {
     const d = LB.data[lbKey()], e = d && d.entries[i]; if (!e) return;
